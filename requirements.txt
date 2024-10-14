@@ -1,0 +1,5 @@
+fastapi[standard]
+vosk
+python-telegram-bot
+soundfile
+numpy
