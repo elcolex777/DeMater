@@ -33,7 +33,7 @@ class DeMater:
             "8000": "data\\censor-beep-2-8000.wav",
             "16000": "data\\censor-beep-2-16000.wav",
             "32000": "data\\censor-beep-2-32000.wav",
-            "44100": "data\\censor-beep-2-48000.wav",
+            "44100": "data\\censor-beep-2-44100.wav",
             "48000": "data\\censor-beep-2-48000.wav",
         }
 
@@ -44,6 +44,7 @@ class DeMater:
 
         beep_wf = wave.open(beep_filename, 'rb')
         beep_data = beep_wf.readframes(beep_wf.getnframes())
+        print(f'beep_wf.getparams={beep_wf.getparams()}, beep_data.len={len(beep_data)}')
 
         return beep_data
 
@@ -53,7 +54,7 @@ class DeMater:
         rec.SetWords(True)
         rec.SetPartialWords(True)
 
-        print(wf.getparams())
+        print(f'input_file.getparams= {wf.getparams()}')
         print(wf.getframerate())
 
         while True:
@@ -105,14 +106,15 @@ class DeMater:
                     start = detected_word["start"]
                     end = detected_word["end"]
 
-                    startIndex = int(max(min(start * wave_params.framerate * wave_params.sampwidth, wave_params.nframes * wave_params.sampwidth ), 0))
-                    endIndex = int(max(min(end * wave_params.framerate * wave_params.sampwidth, wave_params.nframes * wave_params.sampwidth ), 0))
-                    replace_count = int((endIndex - startIndex) * (1 - padding))
+                    startIndex = int(max(min(start * wave_params.framerate * wave_params.sampwidth, wave_params.nframes * wave_params.sampwidth ), 0)) // 2 * 2
+                    endIndex = int(max(min(end * wave_params.framerate * wave_params.sampwidth, wave_params.nframes * wave_params.sampwidth ), 0)) // 2 * 2
+                    replace_count = int((endIndex - startIndex) * (1 - padding)) // 2 * 2
                     endIndex2 = startIndex + replace_count
                     beep_data = self.get_beep_audio(wave_params.framerate)
+
                     data[startIndex:endIndex2] =  beep_data[:replace_count]
 
-                    print(f'replace_count={replace_count}, start={start}, startIndex={startIndex}, end={end}, endIndex={endIndex}, wave_params.framerate={wave_params.framerate},wave_params.nframes={wave_params.nframes}')
+                    print(f'replace_count={replace_count}, start={start}, startIndex={startIndex}, end={end}, endIndex={endIndex}, wave_params.framerate={wave_params.framerate},wave_params.nframes={wave_params.nframes}, data.len={len(data)}')
                 
             wav.writeframes(data)
 
@@ -135,6 +137,9 @@ class DeMater:
 
         out_file = self.replace_audio(input_file, detected_word_list)
         out_text = self.replace_text(result["text"], detected_word_list)
+        out_text = out_text if out_text != "" else "<no text>"
+        # telegram.error.BadRequest: Can't parse entities: character '-' is reserved and must be escaped with the preceding '\'
+        out_text = out_text.replace("-", "\\-")
 
         return {
             "out_file": out_file,

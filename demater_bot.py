@@ -46,7 +46,21 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Send a message when the command /start is issued."""
     user = update.effective_user
     await update.message.reply_html(
-        rf"Hi {user.mention_html()}!",
+        rf"""Привет!
+Этот бот запикивает части аудио с матом. 
+Просто отправьте голосовое в чат или приложите аудиофайл.
+
+Посмотреть текущий список "матерных" слов:
+/targetwords
+
+Использовать свой список "матерных" слов
+/targetwords список,слов,через,запятую
+
+Сбросить свой список "матерных" слов
+/targetwords_reset
+
+
+        """,
         reply_markup=ForceReply(selective=True),
     )
 
@@ -96,8 +110,8 @@ async def voice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     targetwords = demater.get_target_word_list_or_default(session_id=update.message.chat.id)
     result = demater.process(input_file=buffer, target_words=targetwords)
 
-    await update.message.reply_text(result["text"] if result["text"] != "" else "no text" , parse_mode='MarkdownV2')
-    await update.message.reply_audio(audio=result["out_file"])
+    await update.message.reply_text(result["text"] , parse_mode='MarkdownV2')
+    await update.message.reply_audio(audio=result["out_file"], filename="audio.wav")
 
 async def document(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     print('call audio start')
@@ -111,7 +125,7 @@ async def document(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     result = demater.process(input_file=buffer, target_words=targetwords)
     print(f'call audio end: {result["text"]}')
     """Echo the user message."""
-    await update.message.reply_text(result["text"] if result["text"] != "" else "<no text>" , parse_mode='MarkdownV2')
+    await update.message.reply_text(result["text"] , parse_mode='MarkdownV2')
     await update.message.reply_audio(audio=result["out_file"], filename="audio.wav")
 
 async def audio(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -131,8 +145,8 @@ async def audio(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     targetwords = demater.get_target_word_list_or_default(session_id=update.message.chat.id)
     result = demater.process(input_file=buffer, target_words=targetwords)
 
-    await update.message.reply_text(result["text"] if result["text"] != "" else "<no text>" , parse_mode='MarkdownV2')
-    await update.message.reply_audio(audio=result["out_file"])
+    await update.message.reply_text(result["text"] , parse_mode='MarkdownV2')
+    await update.message.reply_audio(audio=result["out_file"], filename="audio.wav")
 
 
 def main() -> None:
