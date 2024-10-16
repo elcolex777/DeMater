@@ -35,9 +35,11 @@ logging.getLogger("httpx").setLevel(logging.WARNING)
 logger = logging.getLogger(__name__)
 
 
+model_path = os.environ.get('DEMATBOT_MODEL_PATH') if os.environ.get('DEMATBOT_MODEL_PATH') is not None else "models\\vosk-model-small-ru-0.22"
+demater = DeMater(model_path=model_path)
 #demater = DeMater(model_path="models\\vosk-model-ru-0.42")
 #demater = DeMater(model_path="models\\vosk-model-small-en-us-0.15")
-demater = DeMater()
+#demater = DeMater()
 
 
 # Define a few command handlers. These usually take the two arguments update and
@@ -110,8 +112,11 @@ async def voice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     targetwords = demater.get_target_word_list_or_default(session_id=update.message.chat.id)
     result = demater.process(input_file=buffer, target_words=targetwords)
 
-    await update.message.reply_text(result["text"] , parse_mode='MarkdownV2')
-    await update.message.reply_audio(audio=result["out_file"], filename="audio.wav")
+    await update.message.reply_text(
+        rf"""{result["text"]}
+Количество матерных слов: {result["detected_word_list_count"]}""" , parse_mode='MarkdownV2')
+
+    await update.message.reply_audio(audio=result["out_file"], message_effect_id="5046509860389126442", filename="audio.wav")
 
 async def document(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     print('call audio start')
@@ -124,9 +129,12 @@ async def document(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     targetwords = demater.get_target_word_list_or_default(session_id=update.message.chat.id)
     result = demater.process(input_file=buffer, target_words=targetwords)
     print(f'call audio end: {result["text"]}')
-    """Echo the user message."""
-    await update.message.reply_text(result["text"] , parse_mode='MarkdownV2')
-    await update.message.reply_audio(audio=result["out_file"], filename="audio.wav")
+
+    await update.message.reply_text(
+        rf"""{result["text"]}
+Количество матерных слов: {result["detected_word_list_count"]}""" , parse_mode='MarkdownV2')
+
+    await update.message.reply_audio(audio=result["out_file"], message_effect_id="5046509860389126442", filename="audio.wav")
 
 async def audio(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     print('call audio start')
@@ -145,8 +153,11 @@ async def audio(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     targetwords = demater.get_target_word_list_or_default(session_id=update.message.chat.id)
     result = demater.process(input_file=buffer, target_words=targetwords)
 
-    await update.message.reply_text(result["text"] , parse_mode='MarkdownV2')
-    await update.message.reply_audio(audio=result["out_file"], filename="audio.wav")
+    await update.message.reply_text(
+        rf"""{result["text"]}
+Матерных слов: {result["detected_word_list_count"]}""" , parse_mode='MarkdownV2')
+
+    await update.message.reply_audio(audio=result["out_file"], message_effect_id="5046509860389126442", filename="audio.wav")
 
 
 def main() -> None:

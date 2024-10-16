@@ -53,6 +53,8 @@ setx DEMATBOT_TOKEN <TOKEN> /m
 Заполнить словарь по-умолчанию для заменяемых слов в файле words.txt (слово или фраза на строку)
 В качестве основы можно загрузить набор слов отсюда:
 https://github.com/bars38/Russian_ban_words/blob/master/words.txt
+https://github.com/FlacSy/BadWords/blob/master/badwords/resource/ru.bdw
+https://disk.yandex.ru/i/6BPhVjuURt4YPA
 
 Запуск приложения бота:
 python demater_bot.py

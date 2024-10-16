@@ -72,19 +72,16 @@ class DeMater:
         return rec.FinalResult()
 
     def mask_text(self, input_text, mask_word_list):
-        words = []
-        for word in mask_word_list:
-            if(word not in words):
-                input_text = input_text.replace(word, "||" + word + "||")
-                words.append(word)
+        input_text = ' '.join(["||" + word + "||" if word in mask_word_list else word for word in input_text.split(' ')])
 
         return input_text
 
     def replace_text(self, input_text, detected_word_list):
         words = [detected_word["word"] for detected_word in detected_word_list]
+        words = list(dict.fromkeys(words)) if len(words) > 0 else []
         return self.mask_text(input_text, words)
 
-    def replace_audio(self, input_file, detected_word_list, padding=0.5):
+    def replace_audio(self, input_file, detected_word_list, padding=0.2):
         #out_file = "tmp-" + str(uuid.uuid4()) + ".wav"# + input_file
         out_file = io.BytesIO()
         out_file.seek(0)
@@ -133,15 +130,19 @@ class DeMater:
         if "result" in result:
             detected_word_list = [item for item in result["result"] if item["word"] in target_word_list]
 
-        print(detected_word_list)
 
         out_file = self.replace_audio(input_file, detected_word_list)
         out_text = self.replace_text(result["text"], detected_word_list)
         out_text = out_text if out_text != "" else "<no text>"
         # telegram.error.BadRequest: Can't parse entities: character '-' is reserved and must be escaped with the preceding '\'
         out_text = out_text.replace("-", "\\-")
+        # telegram.error.BadRequest: Can't parse entities: character '>' is reserved and must be escaped with the preceding '\'
+        out_text = out_text.replace(">", "\\>").replace("<", "\\<").replace(".", "\\.")
+        
+        print(f'out_text={out_text}, detected_word_list={detected_word_list}')
 
         return {
             "out_file": out_file,
-            "text": out_text
+            "text": out_text,
+            "detected_word_list_count": len(detected_word_list)
         }
