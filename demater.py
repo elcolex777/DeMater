@@ -10,7 +10,7 @@ from transformers import AutoModelForSpeechSeq2Seq, AutoProcessor, pipeline
 import numpy as np
 
 class DeMater:
-    def __init__(self, model_path= "models\\vosk-model-small-ru-0.22", beep_filename="data\\censor-beep-2-2.wav"):
+    def __init__(self, model_path= "models/vosk-model-small-ru-0.22", beep_filename="data/censor-beep-2-2.wav"):
         self.model = Model(model_path=model_path)
         self.beep_wf = wave.open(beep_filename, 'rb')
         self.beep_data = self.beep_wf.readframes(self.beep_wf.getnframes())
@@ -56,14 +56,14 @@ class DeMater:
     def get_beep_audio(self, framerate):
 
         beep_filenames = {
-            "8000": "data\\censor-beep-2-8000.wav",
-            "16000": "data\\censor-beep-2-16000.wav",
-            "32000": "data\\censor-beep-2-32000.wav",
-            "44100": "data\\censor-beep-2-44100.wav",
-            "48000": "data\\censor-beep-2-48000.wav",
+            "8000": "data/censor-beep-2-8000.wav",
+            "16000": "data/censor-beep-2-16000.wav",
+            "32000": "data/censor-beep-2-32000.wav",
+            "44100": "data/censor-beep-2-44100.wav",
+            "48000": "data/censor-beep-2-48000.wav",
         }
 
-        beep_filename = "data\\censor-beep-2-2.wav"
+        beep_filename = "data/censor-beep-2-2.wav"
         if str(framerate) in beep_filenames:
             beep_filename = beep_filenames[str(framerate)]
             

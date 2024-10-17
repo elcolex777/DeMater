@@ -61,6 +61,10 @@ set DEMATBOT_TOKEN=<TOKEN>
 
 ```
 setx DEMATBOT_TOKEN <TOKEN> /m
+
+# linux
+export DEMATBOT_TOKEN=<TOKEN>
+export DEMATBOT_MODEL_PATH=models/vosk-model-small-ru-0.22
 ```
 
 Заполнить словарь по-умолчанию для заменяемых слов в файле words.txt (слово или фраза на строку)
@@ -78,16 +82,33 @@ python demater_bot.py
 # Разработка
 
 ```
+git clone https://github.com/elcolex777/DeMater.git
+cd DeMater
+
 python -m venv .venv
+
+source .venv/bin/activate
 .venv\\Scripts\\Activate.bat
 
 pip install -r requirements.txt
 
-fastapi dev [main.py](http://main.py)
-```
+
+
+#fastapi dev [main.py](http://main.py)
+
 
 загрузить модели в папку models и распаковать
+
+cd models
+
+wget "https://alphacephei.com/vosk/models/vosk-model-small-ru-0.22.zip"
+unzip vosk-model-small-ru-0.22.zip
+
+wget "https://alphacephei.com/vosk/models/vosk-model-ru-0.42.zip"
+unzip vosk-model-ru-0.42.zip
+
 <https://alphacephei.com/vosk/models/vosk-model-small-ru-0.22.zip>
 <https://alphacephei.com/vosk/models/vosk-model-ru-0.42.zip>
 
 models\\vosk-model-small-ru-0.22
+```

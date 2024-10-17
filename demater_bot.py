@@ -35,10 +35,10 @@ logging.getLogger("httpx").setLevel(logging.WARNING)
 logger = logging.getLogger(__name__)
 
 
-model_path = os.environ.get('DEMATBOT_MODEL_PATH') if os.environ.get('DEMATBOT_MODEL_PATH') is not None else "models\\vosk-model-small-ru-0.22"
+model_path = os.environ.get('DEMATBOT_MODEL_PATH') if os.environ.get('DEMATBOT_MODEL_PATH') is not None else "models/vosk-model-small-ru-0.22"
 demater = DeMater(model_path=model_path)
-#demater = DeMater(model_path="models\\vosk-model-ru-0.42")
-#demater = DeMater(model_path="models\\vosk-model-small-en-us-0.15")
+#demater = DeMater(model_path="models/vosk-model-ru-0.42")
+#demater = DeMater(model_path="models/vosk-model-small-en-us-0.15")
 #demater = DeMater()
 
 
