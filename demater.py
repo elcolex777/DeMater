@@ -5,6 +5,10 @@ import uuid
 from pathlib import Path
 import io
 
+import torch
+from transformers import AutoModelForSpeechSeq2Seq, AutoProcessor, pipeline
+import numpy as np
+
 class DeMater:
     def __init__(self, model_path= "models\\vosk-model-small-ru-0.22", beep_filename="data\\censor-beep-2-2.wav"):
         self.model = Model(model_path=model_path)
@@ -18,7 +22,29 @@ class DeMater:
         txt = Path('words.txt').read_text(encoding='utf-8')
         self.target_word_list_default = txt.replace('\n', ',')
         self.target_word_list_custom = {}
+
+        self.initWisperModel()
         #print(self.target_word_list_default)
+
+    def initWisperModel(self):
+        device = "cuda:0" if torch.cuda.is_available() else "cpu"
+        torch_dtype = torch.float16 if torch.cuda.is_available() else torch.float32
+        model_id = "openai/whisper-small"
+        model = AutoModelForSpeechSeq2Seq.from_pretrained(
+            model_id, torch_dtype=torch_dtype, low_cpu_mem_usage=True, use_safetensors=True
+        )
+        model.to(device)
+        processor = AutoProcessor.from_pretrained(model_id)
+
+        self.pipeWisperModel = pipeline(
+            "automatic-speech-recognition",
+            model=model,
+            tokenizer=processor.tokenizer,
+            feature_extractor=processor.feature_extractor,
+            torch_dtype=torch_dtype,
+            device=device,
+        )
+        #D:\venv\gpu\Scripts\activate.bat
 
     def get_target_word_list_or_default(self, session_id):
         custom = ""
@@ -47,6 +73,37 @@ class DeMater:
         print(f'beep_wf.getparams={beep_wf.getparams()}, beep_data.len={len(beep_data)}')
 
         return beep_data
+
+    def get_text_from_audio__whisper(self, input_file):
+
+        input_file.seek(0)
+        data = []
+        wave_params = {}
+        with wave.open(input_file, 'rb') as input_wf:
+            wave_params = input_wf.getparams()
+            #wav.setparams((wave_params.nchannels, wave_params.sampwidth, wave_params.framerate, 0, wave_params.comptype, wave_params.compname))
+            data = input_wf.readframes(wave_params.nframes)
+            #data = bytearray(data)
+            data_s16 = np.frombuffer(data, dtype=np.int16, count=len(data)//2, offset=0)
+            data = data_s16 * 0.5**15
+
+        sample = {
+            "array": data,
+            "sampling_rate": wave_params.framerate
+        }
+
+        result = self.pipeWisperModel(sample, return_timestamps="word", generate_kwargs={"language": "russian"})
+
+        print(f'result-whisper={result}')
+
+        """
+        result = {
+            "text": result["text"],
+            "result": result["chunks"]
+        }
+        """
+
+        return result
 
     def get_text_from_audio(self, input_file="test4.wav"):
         wf = wave.open(input_file, 'rb')
@@ -129,6 +186,14 @@ class DeMater:
         detected_word_list = []
         if "result" in result:
             detected_word_list = [item for item in result["result"] if item["word"] in target_word_list]
+        
+        resultWhisper = self.get_text_from_audio__whisper(input_file)
+        if "chunks" in resultWhisper:
+            for item in resultWhisper["chunks"]:
+                word = item["text"].strip().replace("!", "").replace(",", "").replace(",", "").lower()
+                if word in target_word_list:
+                    detected_word = {"word": word, "start": item["timestamp"][0], "end": item["timestamp"][1]}
+                    detected_word_list.append(detected_word)
 
 
         out_file = self.replace_audio(input_file, detected_word_list)

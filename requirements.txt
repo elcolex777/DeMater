@@ -3,3 +3,10 @@ vosk
 python-telegram-bot
 soundfile
 numpy
+torch
+torchvision
+torchaudio
+librosa
+datasets
+transformers
+accelerate
