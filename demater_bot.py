@@ -77,7 +77,7 @@ async def echo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     targetwords = targetwords.split(",")
 
     
-    targetwords = demater.mask_text(update.message.text, targetwords)
+    targetwords = demater.replace_text(update.message.text, targetwords)
     await update.message.reply_text(targetwords , parse_mode='MarkdownV2')
 
     #await update.message.reply_text(update.message.text)

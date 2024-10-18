@@ -134,10 +134,10 @@ class DeMater:
         return input_text
 
     def replace_text(self, input_text, detected_word_list):
-        words = [detected_word["word"] for detected_word in detected_word_list]
+        words = [detected_word if type(detected_word) == str else detected_word["word"] for detected_word in detected_word_list]
         words = list(dict.fromkeys(words)) if len(words) > 0 else []
         
-        input_text = input_text.replace("?", "").replace("!", "").replace(",", "").replace(".", "").lower()
+        input_text = input_text.replace(")", "").replace("?", "").replace("!", "").replace(",", "").replace(".", "").lower()
         input_text = input_text if input_text != "" else "<no text>"
         # telegram.error.BadRequest: Can't parse entities: character '-' is reserved and must be escaped with the preceding '\'
         input_text = input_text.replace("-", "\\-")
