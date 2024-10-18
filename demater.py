@@ -92,7 +92,7 @@ class DeMater:
             "sampling_rate": wave_params.framerate
         }
 
-        result = self.pipeWisperModel(sample, return_timestamps="word", generate_kwargs={"language": "russian"})
+        result = self.pipeWisperModel(sample, return_timestamps="word", chunk_length_s=30, generate_kwargs={"language": "russian"})
 
         print(f'result-whisper={result}')
 
@@ -136,6 +136,14 @@ class DeMater:
     def replace_text(self, input_text, detected_word_list):
         words = [detected_word["word"] for detected_word in detected_word_list]
         words = list(dict.fromkeys(words)) if len(words) > 0 else []
+        
+        input_text = input_text.replace("?", "").replace("!", "").replace(",", "").replace(".", "").lower()
+        input_text = input_text if input_text != "" else "<no text>"
+        # telegram.error.BadRequest: Can't parse entities: character '-' is reserved and must be escaped with the preceding '\'
+        input_text = input_text.replace("-", "\\-")
+        # telegram.error.BadRequest: Can't parse entities: character '>' is reserved and must be escaped with the preceding '\'
+        input_text = input_text.replace(">", "\\>").replace("<", "\\<").replace(".", "\\.")
+
         return self.mask_text(input_text, words)
 
     def replace_audio(self, input_file, detected_word_list, padding=0.2):
@@ -186,28 +194,29 @@ class DeMater:
         detected_word_list = []
         if "result" in result:
             detected_word_list = [item for item in result["result"] if item["word"] in target_word_list]
+        detected_word_list_count = len(detected_word_list)
         
         resultWhisper = self.get_text_from_audio__whisper(input_file)
+        detected_word_list2_count = 0
         if "chunks" in resultWhisper:
             for item in resultWhisper["chunks"]:
-                word = item["text"].strip().replace("!", "").replace(",", "").replace(",", "").lower()
+                word = item["text"].strip().replace("?", "").replace("!", "").replace(",", "").replace(".", "").lower()
                 if word in target_word_list:
                     detected_word = {"word": word, "start": item["timestamp"][0], "end": item["timestamp"][1]}
                     detected_word_list.append(detected_word)
-
+                    detected_word_list2_count = detected_word_list2_count + 1
 
         out_file = self.replace_audio(input_file, detected_word_list)
         out_text = self.replace_text(result["text"], detected_word_list)
-        out_text = out_text if out_text != "" else "<no text>"
-        # telegram.error.BadRequest: Can't parse entities: character '-' is reserved and must be escaped with the preceding '\'
-        out_text = out_text.replace("-", "\\-")
-        # telegram.error.BadRequest: Can't parse entities: character '>' is reserved and must be escaped with the preceding '\'
-        out_text = out_text.replace(">", "\\>").replace("<", "\\<").replace(".", "\\.")
-        
+
+        out_text_whisper = self.replace_text(resultWhisper["text"], detected_word_list)
+
         print(f'out_text={out_text}, detected_word_list={detected_word_list}')
 
         return {
             "out_file": out_file,
             "text": out_text,
-            "detected_word_list_count": len(detected_word_list)
+            "detected_word_list_count": detected_word_list_count,
+            "text_whisper": out_text_whisper,
+            "detected_word_list2_count": detected_word_list2_count
         }

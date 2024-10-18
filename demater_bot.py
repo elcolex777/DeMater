@@ -73,13 +73,20 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
 async def echo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Echo the user message."""
-    await update.message.reply_text(update.message.text)
+    targetwords = demater.get_target_word_list_or_default(session_id=update.message.chat.id)
+    targetwords = targetwords.split(",")
+
+    
+    targetwords = demater.mask_text(update.message.text, targetwords)
+    await update.message.reply_text(targetwords , parse_mode='MarkdownV2')
+
+    #await update.message.reply_text(update.message.text)
 
 async def target_words(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     
     targetwords_new = update.message.text.replace("/targetwords", "")
     if len(targetwords_new) > 0:
-        demater.target_word_list_custom[update.message.chat.id] = targetwords_new.strip()
+        demater.target_word_list_custom[update.message.chat.id] = targetwords_new.strip().replace(" ", ",")
 
     targetwords = demater.get_target_word_list_or_default(session_id=update.message.chat.id)
     targetwords = targetwords[:100] + ("\.\.\." if len(targetwords) > 100 else "")
@@ -108,13 +115,20 @@ async def voice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     buffer = io.BytesIO()
     sf.write(file=buffer, data=data, samplerate=samplerate, format='WAV')
 
+    await update.message.reply_text("начинаем обработку\.\.\." , parse_mode='MarkdownV2')
+
     buffer.seek(0)
     targetwords = demater.get_target_word_list_or_default(session_id=update.message.chat.id)
     result = demater.process(input_file=buffer, target_words=targetwords)
 
     await update.message.reply_text(
-        rf"""{result["text"]}
+        rf"""Вариант 1:
+{result["text"]}
 Количество матерных слов: {result["detected_word_list_count"]}""" , parse_mode='MarkdownV2')
+    await update.message.reply_text(
+        rf"""Вариант 2:
+{result["text_whisper"]}
+Количество матерных слов: {result["detected_word_list2_count"]}""" , parse_mode='MarkdownV2')
 
     await update.message.reply_audio(audio=result["out_file"], message_effect_id="5046509860389126442", filename="audio.wav")
 
@@ -124,15 +138,21 @@ async def document(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     buffer = io.BytesIO()
     new_file = await context.bot.get_file(update.message.document.file_id)
     await new_file.download_to_memory(out=buffer)
+    
+    await update.message.reply_text("начинаем обработку\.\.\." , parse_mode='MarkdownV2')
 
     buffer.seek(0)
     targetwords = demater.get_target_word_list_or_default(session_id=update.message.chat.id)
     result = demater.process(input_file=buffer, target_words=targetwords)
-    print(f'call audio end: {result["text"]}')
 
     await update.message.reply_text(
-        rf"""{result["text"]}
+        rf"""Вариант 1:
+{result["text"]}
 Количество матерных слов: {result["detected_word_list_count"]}""" , parse_mode='MarkdownV2')
+    await update.message.reply_text(
+        rf"""Вариант 2:
+{result["text_whisper"]}
+Количество матерных слов: {result["detected_word_list2_count"]}""" , parse_mode='MarkdownV2')
 
     await update.message.reply_audio(audio=result["out_file"], message_effect_id="5046509860389126442", filename="audio.wav")
 
@@ -149,13 +169,20 @@ async def audio(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     buffer = io.BytesIO()
     sf.write(file=buffer, data=data, samplerate=samplerate, format='WAV')
 
+    await update.message.reply_text("начинаем обработку\.\.\." , parse_mode='MarkdownV2')
+
     buffer.seek(0)
     targetwords = demater.get_target_word_list_or_default(session_id=update.message.chat.id)
     result = demater.process(input_file=buffer, target_words=targetwords)
 
     await update.message.reply_text(
-        rf"""{result["text"]}
-Матерных слов: {result["detected_word_list_count"]}""" , parse_mode='MarkdownV2')
+        rf"""Вариант 1:
+{result["text"]}
+Количество матерных слов: {result["detected_word_list_count"]}""" , parse_mode='MarkdownV2')
+    await update.message.reply_text(
+        rf"""Вариант 2:
+{result["text_whisper"]}
+Количество матерных слов: {result["detected_word_list2_count"]}""" , parse_mode='MarkdownV2')
 
     await update.message.reply_audio(audio=result["out_file"], message_effect_id="5046509860389126442", filename="audio.wav")
 

@@ -36,6 +36,8 @@
 /targetwords_reset
 ```
 
+![example](https://raw.githubusercontent.com/elcolex777/DeMater/refs/heads/main/example.jpg)
+
 ### Приложение командной строки:
 
 (в разработке)
@@ -45,11 +47,13 @@ python [demater.py](http://demater.py) --input_file=mater.wav --out_file=demater
 
 Создать бота в телеграмм
 переходим к боту @BotFather и отправляем команды создания своего бота
+```
 /newbot
 DeMatTest_bot
 DeMatTest_bot
 Use this token to access the HTTP API:
 <TOKEN>
+```
 
 Сохранить токен в переменной окружения:
 
@@ -65,6 +69,12 @@ setx DEMATBOT_TOKEN <TOKEN> /m
 # linux
 export DEMATBOT_TOKEN=<TOKEN>
 export DEMATBOT_MODEL_PATH=models/vosk-model-small-ru-0.22
+
+sudo cp -l /app/demater.service /etc/systemd/system/demater.service
+sudo systemctl daemon-reload
+sudo systemctl enable demater.service
+sudo systemctl start demater.service
+sudo systemctl status demater.service
 ```
 
 Заполнить словарь по-умолчанию для заменяемых слов в файле words.txt (слово или фраза на строку)

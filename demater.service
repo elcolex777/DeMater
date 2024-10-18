@@ -1,0 +1,16 @@
+[Unit]
+Description=DeMater Bot service
+After=multi-user.target
+ 
+[Service]
+User=user1
+Group=admin
+Type=simple
+Environment="DEMATBOT_TOKEN=<TOKEN>"
+Environment="DEMATBOT_MODEL_PATH=models/vosk-model-small-ru-0.22"
+Restart=always
+WorkingDirectory=/app/DeMater
+ExecStart=/usr/bin/python3 demater_bot.py
+ 
+[Install]
+WantedBy=multi-user.target
