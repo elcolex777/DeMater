@@ -55,15 +55,17 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 Посмотреть текущий список "матерных" слов:
 /targetwords
 
-Использовать свой список "матерных" слов
-/targetwords список,слов,через,запятую
+Использовать свой список "матерных" слов:
+/targetwords список слов через пробел
 
-Сбросить свой список "матерных" слов
+Добавить свой список "матерных" слов к основному:
+/targetwords_add список слов через пробел
+
+Сбросить свой список "матерных" слов:
 /targetwords_reset
 
 
-        """,
-        reply_markup=ForceReply(selective=True),
+        """
     )
 
 
@@ -86,21 +88,36 @@ async def target_words(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     
     targetwords_new = update.message.text.replace("/targetwords", "")
     if len(targetwords_new) > 0:
-        demater.target_word_list_custom[update.message.chat.id] = targetwords_new.strip().replace(" ", ",")
+        demater.target_word_list_custom[update.message.chat.id] = targetwords_new.strip().replace(" ", ",").lower()
 
     targetwords = demater.get_target_word_list_or_default(session_id=update.message.chat.id)
-    targetwords = targetwords[:100] + ("\.\.\." if len(targetwords) > 100 else "")
-    targetwords = demater.mask_text(targetwords, targetwords.split(" "))
-    await update.message.reply_text(targetwords , parse_mode='MarkdownV2')
+    targetwords = targetwords.split(",")[:20]
+    targetwords_masked = demater.replace_text(" ".join(targetwords), targetwords)
+    targetwords_masked = targetwords_masked + ("\.\.\." if len(targetwords) >= 20 else "")
+    await update.message.reply_text(targetwords_masked , parse_mode='MarkdownV2')
+
+async def targetwords_add(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    
+    targetwords_new = update.message.text.replace("/targetwords_add", "")
+    if len(targetwords_new) > 0:
+        demater.target_word_list_custom[update.message.chat.id] = targetwords_new.strip().replace(" ", ",").lower()\
+            + ',' + demater.get_target_word_list_or_default(session_id=update.message.chat.id)
+
+    targetwords = demater.get_target_word_list_or_default(session_id=update.message.chat.id)
+    targetwords = targetwords.split(",")[:20]
+    targetwords_masked = demater.replace_text(" ".join(targetwords), targetwords)
+    targetwords_masked = targetwords_masked + ("\.\.\." if len(targetwords) >= 20 else "")
+    await update.message.reply_text(targetwords_masked , parse_mode='MarkdownV2')
 
 async def targetwords_reset(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     
     demater.target_word_list_custom[update.message.chat.id] = ""
 
     targetwords = demater.get_target_word_list_or_default(session_id=update.message.chat.id)
-    targetwords = targetwords[:100] + ("\.\.\." if len(targetwords) > 100 else "")
-    targetwords = demater.mask_text(targetwords, targetwords.split(" "))
-    await update.message.reply_text(targetwords , parse_mode='MarkdownV2')
+    targetwords = targetwords.split(",")[:20]
+    targetwords_masked = demater.replace_text(" ".join(targetwords), targetwords)
+    targetwords_masked = targetwords_masked + ("\.\.\." if len(targetwords) >= 20 else "")
+    await update.message.reply_text(targetwords_masked , parse_mode='MarkdownV2')
 
 async def voice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     print('call audio start')
@@ -203,6 +220,7 @@ def main() -> None:
     print('handler audio register')
 
     application.add_handler(CommandHandler("targetwords", target_words))
+    application.add_handler(CommandHandler("targetwords_add", targetwords_add))
     application.add_handler(CommandHandler("targetwords_reset", targetwords_reset))
 
     # on non command i.e message - echo the message on Telegram

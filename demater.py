@@ -8,6 +8,7 @@ import io
 import torch
 from transformers import AutoModelForSpeechSeq2Seq, AutoProcessor, pipeline
 import numpy as np
+import re
 
 class DeMater:
     def __init__(self, model_path= "models/vosk-model-small-ru-0.22", beep_filename="data/censor-beep-2-2.wav"):
@@ -128,23 +129,39 @@ class DeMater:
 
         return rec.FinalResult()
 
-    def mask_text(self, input_text, mask_word_list):
-        input_text = ' '.join(["||" + word + "||" if word in mask_word_list else word for word in input_text.split(' ')])
-
-        return input_text
-
     def replace_text(self, input_text, detected_word_list):
         words = [detected_word if type(detected_word) == str else detected_word["word"] for detected_word in detected_word_list]
         words = list(dict.fromkeys(words)) if len(words) > 0 else []
         
-        input_text = input_text.replace(")", "").replace("?", "").replace("!", "").replace(",", "").replace(".", "").lower()
-        input_text = input_text if input_text != "" else "<no text>"
         # telegram.error.BadRequest: Can't parse entities: character '-' is reserved and must be escaped with the preceding '\'
-        input_text = input_text.replace("-", "\\-")
-        # telegram.error.BadRequest: Can't parse entities: character '>' is reserved and must be escaped with the preceding '\'
-        input_text = input_text.replace(">", "\\>").replace("<", "\\<").replace(".", "\\.")
+        input_text = re.sub(r"([-_*\[\]()~`>#+=|{}.!])", r"\\\g<1>", input_text)
+        input_tokens = input_text.split()
 
-        return self.mask_text(input_text, words)
+        input_tokens_replaced = []
+        for input_token in input_tokens:
+            input_token_test = input_token.lower()
+            if input_token_test in words:
+                input_tokens_replaced.append("||" + input_token + "||")
+            else:
+                word_matched = ""
+                for word in words:
+                    if word in input_token_test and len(word) > len(word_matched):
+                        word_matched = word
+                
+                if word_matched != "":
+                    startIndex = input_token_test.find(word_matched)
+                    endIndex = startIndex + len(word_matched)
+                    word_to_replace = input_token[startIndex:endIndex]
+                    if ((input_token[startIndex-1:startIndex] == ''\
+                            or not input_token[startIndex-1:startIndex].isalpha())\
+                        and (input_token[endIndex:endIndex+1] == ''\
+                            or not input_token[endIndex:endIndex+1].isalpha())):
+                        input_token = input_token.replace(word_to_replace, "||" + word_to_replace + "||")
+                
+                input_tokens_replaced.append(input_token)
+        
+        return ' '.join(input_tokens_replaced)
+                    
 
     def replace_audio(self, input_file, detected_word_list, padding=0.2):
         #out_file = "tmp-" + str(uuid.uuid4()) + ".wav"# + input_file
@@ -167,6 +184,8 @@ class DeMater:
                 for detected_word in detected_word_list:
                     start = detected_word["start"]
                     end = detected_word["end"]
+
+                    #end = min(end, start+0.7)
 
                     startIndex = int(max(min(start * wave_params.framerate * wave_params.sampwidth, wave_params.nframes * wave_params.sampwidth ), 0)) // 2 * 2
                     endIndex = int(max(min(end * wave_params.framerate * wave_params.sampwidth, wave_params.nframes * wave_params.sampwidth ), 0)) // 2 * 2
