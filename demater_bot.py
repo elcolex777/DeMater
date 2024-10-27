@@ -17,8 +17,8 @@ bot.
 
 import logging
 
-from telegram import ForceReply, Update
-from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
+from telegram import ForceReply, ReplyKeyboardRemove, Update
+from telegram.ext import Application, CommandHandler, ContextTypes, ConversationHandler, MessageHandler, filters
 
 import os
 import io
@@ -42,6 +42,9 @@ demater = DeMater(model_path=model_path)
 #demater = DeMater()
 
 
+TARGETWORDS_SET = 1
+TARGETWORDS_ADD = 2
+
 # Define a few command handlers. These usually take the two arguments update and
 # context.
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -56,10 +59,12 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 /targetwords
 
 Использовать свой список "матерных" слов:
-/targetwords список слов через пробел
+/targetwords_set
+список слов через пробел
 
 Добавить свой список "матерных" слов к основному:
-/targetwords_add список слов через пробел
+/targetwords_add
+список слов через пробел
 
 Сбросить свой список "матерных" слов:
 /targetwords_reset
@@ -84,6 +89,14 @@ async def echo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
     #await update.message.reply_text(update.message.text)
 
+async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Cancels and ends the conversation."""
+    await update.message.reply_text(
+        "OK", reply_markup=ReplyKeyboardRemove()
+    )
+
+    return ConversationHandler.END
+
 async def target_words(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     
     targetwords_new = update.message.text.replace("/targetwords", "")
@@ -96,9 +109,42 @@ async def target_words(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     targetwords_masked = targetwords_masked + ("\.\.\." if len(targetwords) >= 20 else "")
     await update.message.reply_text(targetwords_masked , parse_mode='MarkdownV2')
 
-async def targetwords_add(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def targetwords_set(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     
-    targetwords_new = update.message.text.replace("/targetwords_add", "")
+    await update.message.reply_text(
+         "Использовать свой список \"матерных\" слов\. \nИли /cancel для отмены ввода"
+         "\n\nСписок слов через пробел\:", 
+         parse_mode='MarkdownV2'
+    )
+
+    return TARGETWORDS_SET
+
+
+async def targetwords_set_end(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    
+    targetwords_new = update.message.text
+    if len(targetwords_new) > 0:
+        demater.target_word_list_custom[update.message.chat.id] = targetwords_new.strip().replace(" ", ",").lower()
+
+    targetwords = demater.get_target_word_list_or_default(session_id=update.message.chat.id)
+    targetwords = targetwords.split(",")[:20]
+    targetwords_masked = demater.replace_text(" ".join(targetwords), targetwords)
+    targetwords_masked = targetwords_masked + ("\.\.\." if len(targetwords) >= 20 else "")
+    await update.message.reply_text(targetwords_masked , parse_mode='MarkdownV2')
+
+async def targetwords_add(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    
+    await update.message.reply_text(
+         "Добавить свой список \"матерных\" слов к текущему\. \nИли /cancel для отмены ввода"
+         "\n\nСписок слов через пробел\:", 
+         parse_mode='MarkdownV2'
+    )
+
+    return TARGETWORDS_ADD
+
+async def targetwords_add__end(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    
+    targetwords_new = update.message.text
     if len(targetwords_new) > 0:
         demater.target_word_list_custom[update.message.chat.id] = targetwords_new.strip().replace(" ", ",").lower()\
             + ',' + demater.get_target_word_list_or_default(session_id=update.message.chat.id)
@@ -108,6 +154,8 @@ async def targetwords_add(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     targetwords_masked = demater.replace_text(" ".join(targetwords), targetwords)
     targetwords_masked = targetwords_masked + ("\.\.\." if len(targetwords) >= 20 else "")
     await update.message.reply_text(targetwords_masked , parse_mode='MarkdownV2')
+
+    return ConversationHandler.END
 
 async def targetwords_reset(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     
@@ -220,8 +268,25 @@ def main() -> None:
     print('handler audio register')
 
     application.add_handler(CommandHandler("targetwords", target_words))
-    application.add_handler(CommandHandler("targetwords_add", targetwords_add))
     application.add_handler(CommandHandler("targetwords_reset", targetwords_reset))
+
+    conv_handler_add = ConversationHandler(
+        entry_points=[CommandHandler("targetwords_add", targetwords_add)],
+        states={
+            TARGETWORDS_ADD: [MessageHandler(filters.TEXT & ~filters.COMMAND, targetwords_add__end)],
+        },
+        fallbacks=[CommandHandler("cancel", cancel)],
+    )
+    application.add_handler(conv_handler_add)
+    
+    conv_handler_set = ConversationHandler(
+        entry_points=[CommandHandler("targetwords_set", targetwords_set)],
+        states={
+            TARGETWORDS_SET: [MessageHandler(filters.TEXT & ~filters.COMMAND, targetwords_set_end)],
+        },
+        fallbacks=[CommandHandler("cancel", cancel)],
+    )
+    application.add_handler(conv_handler_set)
 
     # on non command i.e message - echo the message on Telegram
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, echo))
