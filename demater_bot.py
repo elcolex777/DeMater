@@ -101,7 +101,7 @@ async def target_words(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     
     targetwords_new = update.message.text.replace("/targetwords", "")
     if len(targetwords_new) > 0:
-        demater.target_word_list_custom[update.message.chat.id] = targetwords_new.strip().replace(" ", ",").lower()
+        demater.get_user_data_or_new(update.message.chat.id)["target_word_list_custom"] = targetwords_new.strip().replace(" ", ",").lower()
 
     targetwords = demater.get_target_word_list_or_default(session_id=update.message.chat.id)
     targetwords = targetwords.split(",")[:20]
@@ -124,7 +124,7 @@ async def targetwords_set_end(update: Update, context: ContextTypes.DEFAULT_TYPE
     
     targetwords_new = update.message.text
     if len(targetwords_new) > 0:
-        demater.target_word_list_custom[update.message.chat.id] = targetwords_new.strip().replace(" ", ",").lower()
+        demater.get_user_data_or_new(update.message.chat.id)["target_word_list_custom"] = targetwords_new.strip().replace(" ", ",").lower()
 
     targetwords = demater.get_target_word_list_or_default(session_id=update.message.chat.id)
     targetwords = targetwords.split(",")[:20]
@@ -146,7 +146,7 @@ async def targetwords_add__end(update: Update, context: ContextTypes.DEFAULT_TYP
     
     targetwords_new = update.message.text
     if len(targetwords_new) > 0:
-        demater.target_word_list_custom[update.message.chat.id] = targetwords_new.strip().replace(" ", ",").lower()\
+        demater.get_user_data_or_new(update.message.chat.id)["target_word_list_custom"] = targetwords_new.strip().replace(" ", ",").lower()\
             + ',' + demater.get_target_word_list_or_default(session_id=update.message.chat.id)
 
     targetwords = demater.get_target_word_list_or_default(session_id=update.message.chat.id)
@@ -159,7 +159,7 @@ async def targetwords_add__end(update: Update, context: ContextTypes.DEFAULT_TYP
 
 async def targetwords_reset(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     
-    demater.target_word_list_custom[update.message.chat.id] = ""
+    demater.user_data[update.message.chat.id]["target_word_list_custom"] = ""
 
     targetwords = demater.get_target_word_list_or_default(session_id=update.message.chat.id)
     targetwords = targetwords.split(",")[:20]
@@ -184,7 +184,7 @@ async def voice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
     buffer.seek(0)
     targetwords = demater.get_target_word_list_or_default(session_id=update.message.chat.id)
-    result = demater.process(input_file=buffer, target_words=targetwords)
+    result = demater.process(input_file=buffer, target_words=targetwords, session_id=update.message.chat.id)
 
     await update.message.reply_text(
         rf"""Вариант 1:
@@ -208,7 +208,7 @@ async def document(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
     buffer.seek(0)
     targetwords = demater.get_target_word_list_or_default(session_id=update.message.chat.id)
-    result = demater.process(input_file=buffer, target_words=targetwords)
+    result = demater.process(input_file=buffer, target_words=targetwords, session_id=update.message.chat.id)
 
     await update.message.reply_text(
         rf"""Вариант 1:
@@ -238,7 +238,7 @@ async def audio(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
     buffer.seek(0)
     targetwords = demater.get_target_word_list_or_default(session_id=update.message.chat.id)
-    result = demater.process(input_file=buffer, target_words=targetwords)
+    result = demater.process(input_file=buffer, target_words=targetwords, session_id=update.message.chat.id)
 
     await update.message.reply_text(
         rf"""Вариант 1:

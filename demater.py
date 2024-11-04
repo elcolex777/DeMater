@@ -13,16 +13,10 @@ import re
 class DeMater:
     def __init__(self, model_path= "models/vosk-model-small-ru-0.22", beep_filename="data/censor-beep-2-2.wav"):
         self.model = Model(model_path=model_path)
-        self.beep_wf = wave.open(beep_filename, 'rb')
-        self.beep_data = self.beep_wf.readframes(self.beep_wf.getnframes())
-        
-        print(self.beep_wf.getparams())
-        print(len(self.beep_data))
-        #print(self.beep_data)
 
         txt = Path('words.txt').read_text(encoding='utf-8')
         self.target_word_list_default = txt.replace('\n', ',')
-        self.target_word_list_custom = {}
+        self.user_data = {}
 
         self.initWisperModel()
         #print(self.target_word_list_default)
@@ -47,14 +41,20 @@ class DeMater:
         )
         #D:\venv\gpu\Scripts\activate.bat
 
+    def get_user_data_or_new(self, session_id):
+        if session_id not in self.user_data:
+            self.user_data[session_id] = {}
+
+        return self.user_data[session_id]
+
     def get_target_word_list_or_default(self, session_id):
         custom = ""
-        if session_id in self.target_word_list_custom:
-            custom = self.target_word_list_custom[session_id]
+        if session_id in self.user_data:
+            custom = self.user_data[session_id]["target_word_list_custom"]
             
         return custom if custom != "" else self.target_word_list_default
 
-    def get_beep_audio(self, framerate):
+    def get_beep_audio(self, framerate, session_id=None):
 
         beep_filenames = {
             "8000": "data/censor-beep-2-8000.wav",
@@ -63,6 +63,11 @@ class DeMater:
             "44100": "data/censor-beep-2-44100.wav",
             "48000": "data/censor-beep-2-48000.wav",
         }
+
+        if session_id in self.user_data:
+            session_data = self.user_data[session_id]
+            if "beep_data" in session_data:
+                beep_filenames = session_data["beep_data"]
 
         beep_filename = "data/censor-beep-2-2.wav"
         if str(framerate) in beep_filenames:
@@ -163,7 +168,7 @@ class DeMater:
         return ' '.join(input_tokens_replaced)
                     
 
-    def replace_audio(self, input_file, detected_word_list, padding=0.2):
+    def replace_audio(self, input_file, detected_word_list, session_id=None, padding=0.1):
         #out_file = "tmp-" + str(uuid.uuid4()) + ".wav"# + input_file
         out_file = io.BytesIO()
         out_file.seek(0)
@@ -185,13 +190,15 @@ class DeMater:
                     start = detected_word["start"]
                     end = detected_word["end"]
 
-                    #end = min(end, start+0.7)
+                    start = min(start, start + padding)
+                    end = max(end, end - padding)
+                    end = min(end, start+0.7)
 
                     startIndex = int(max(min(start * wave_params.framerate * wave_params.sampwidth, wave_params.nframes * wave_params.sampwidth ), 0)) // 2 * 2
                     endIndex = int(max(min(end * wave_params.framerate * wave_params.sampwidth, wave_params.nframes * wave_params.sampwidth ), 0)) // 2 * 2
-                    replace_count = int((endIndex - startIndex) * (1 - padding)) // 2 * 2
+                    replace_count = int(endIndex - startIndex) // 2 * 2
                     endIndex2 = startIndex + replace_count
-                    beep_data = self.get_beep_audio(wave_params.framerate)
+                    beep_data = self.get_beep_audio(wave_params.framerate, session_id)
 
                     data[startIndex:endIndex2] =  beep_data[:replace_count]
 
@@ -202,7 +209,7 @@ class DeMater:
         out_file.seek(0)
         return out_file
 
-    def process(self, input_file="test4.wav", target_words=None):
+    def process(self, input_file="test4.wav", target_words=None, session_id=None):
         result = self.get_text_from_audio(input_file=input_file)
         #print(result)
         result = json.loads(result)
@@ -225,7 +232,7 @@ class DeMater:
                     detected_word_list.append(detected_word)
                     detected_word_list2_count = detected_word_list2_count + 1
 
-        out_file = self.replace_audio(input_file, detected_word_list)
+        out_file = self.replace_audio(input_file, detected_word_list, session_id)
         out_text = self.replace_text(result["text"], detected_word_list)
 
         out_text_whisper = self.replace_text(resultWhisper["text"], detected_word_list)
