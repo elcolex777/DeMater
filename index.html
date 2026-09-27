@@ -1,0 +1,319 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+  <title>DeMater Web Chat</title>
+  <style>
+    :root {
+      --bg: #0e1621;
+      --chat-bg: #17212b;
+      --bubble-in: #182533;
+      --bubble-out: #2b5278;
+      --text: #f5f5f5;
+      --text-muted: #798b9b;
+      --accent: #5288c1;
+      --danger: #e53935;
+    }
+    * { 
+      box-sizing: border-box; 
+      margin: 0; 
+      padding: 0; 
+      -webkit-tap-highlight-color: transparent;
+    }
+    html, body {
+      height: 100%;
+      height: 100dvh; /* Решение проблемы мобильного скролла */
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      overflow: hidden;
+    }
+    .chat-container {
+      width: 100%;
+      max-width: 800px;
+      margin: 0 auto;
+      display: flex;
+      flex-direction: column;
+      height: 100%;
+      height: 100dvh;
+      background: var(--chat-bg);
+      box-shadow: 0 0 16px rgba(0,0,0,0.4);
+    }
+    header {
+      padding: 12px 20px;
+      background: var(--bubble-in);
+      border-bottom: 1px solid rgba(255,255,255,0.06);
+      flex-shrink: 0;
+    }
+    header h1 { font-size: 1.05rem; font-weight: 600; }
+    .status { font-size: 0.75rem; color: var(--text-muted); }
+    
+    .messages {
+      flex: 1 1 auto;
+      overflow-y: auto;
+      padding: 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    .msg {
+      max-width: 85%;
+      padding: 10px 14px;
+      border-radius: 12px;
+      line-height: 1.45;
+      word-wrap: break-word;
+      font-size: 0.95rem;
+    }
+    .msg.user {
+      align-self: flex-end;
+      background: var(--bubble-out);
+      border-bottom-right-radius: 2px;
+    }
+    .msg.bot {
+      align-self: flex-start;
+      background: var(--bubble-in);
+      border-bottom-left-radius: 2px;
+    }
+    
+    /* Стили скрытого текста (спойлера) */
+    .spoiler {
+      background-color: #3b434c;
+      color: #3b434c;
+      padding: 1px 5px;
+      border-radius: 4px;
+      cursor: pointer;
+      user-select: none;
+      display: inline-block;
+      transition: background 0.2s, color 0.2s;
+    }
+    .spoiler.revealed {
+      background-color: rgba(255, 255, 255, 0.15);
+      color: #fff !important;
+      user-select: text;
+    }
+
+    audio {
+      width: 100%;
+      margin-top: 8px;
+      border-radius: 20px;
+      outline: none;
+    }
+    
+    .input-bar {
+      padding: 10px 14px;
+      padding-bottom: calc(10px + env(safe-area-inset-bottom));
+      background: var(--bubble-in);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      border-top: 1px solid rgba(255,255,255,0.06);
+      flex-shrink: 0; /* Гарантирует, что блок никогда не сожмется и не скроется */
+    }
+    .input-bar input[type="text"] {
+      flex: 1;
+      background: #242f3d;
+      border: 1px solid rgba(255,255,255,0.1);
+      border-radius: 20px;
+      padding: 10px 16px;
+      color: #fff;
+      outline: none;
+      font-size: 0.95rem;
+      min-width: 0;
+    }
+    .btn {
+      background: none;
+      border: none;
+      color: var(--accent);
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 8px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+    .btn.recording {
+      color: var(--danger);
+      animation: pulse 1s infinite alternate;
+    }
+    @keyframes pulse {
+      from { transform: scale(1); }
+      to { transform: scale(1.15); }
+    }
+    #fileInput { display: none; }
+  </style>
+</head>
+<body>
+  <div class="chat-container">
+    <header>
+      <h1>DeMater Web Chat</h1>
+      <div class="status">Цензурирование текста и аудио</div>
+    </header>
+
+    <div class="messages" id="messages">
+      <div class="msg bot">
+        Привет! Я веб-версия DeMater.<br/>
+        Отправьте текст, прикрепите файл или запишите голосовое.<br/>
+        Скрытые матерные слова можно открыть кликом.
+      </div>
+    </div>
+
+    <div class="input-bar">
+      <button class="btn" title="Прикрепить аудиофайл" onclick="document.getElementById('fileInput').click()">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/>
+        </svg>
+      </button>
+      <input type="file" id="fileInput" accept="audio/*" />
+
+      <input type="text" id="textInput" placeholder="Сообщение или команда..." autocomplete="off" />
+
+      <button class="btn" id="recordBtn" title="Запись с микрофона">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
+          <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
+          <line x1="12" y1="19" x2="12" y2="23"/>
+          <line x1="8" y1="23" x2="16" y2="23"/>
+        </svg>
+      </button>
+
+      <button class="btn" id="sendBtn" title="Отправить">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <line x1="22" y1="2" x2="11" y2="13"/>
+          <polygon points="22 2 15 22 11 13 2 9 22 2"/>
+        </svg>
+      </button>
+    </div>
+  </div>
+
+  <script>
+    let sessionId = localStorage.getItem('demater_session_id');
+    if (!sessionId) {
+      sessionId = 'web_' + Math.random().toString(36).substring(2, 12);
+      localStorage.setItem('demater_session_id', sessionId);
+    }
+
+    const messagesBox = document.getElementById('messages');
+    const textInput = document.getElementById('textInput');
+    const sendBtn = document.getElementById('sendBtn');
+    const fileInput = document.getElementById('fileInput');
+    const recordBtn = document.getElementById('recordBtn');
+
+    // Делегирование кликов по спойлерам (работает для динамически добавленных сообщений)
+    messagesBox.addEventListener('click', (e) => {
+      if (e.target && e.target.classList.contains('spoiler')) {
+        e.target.classList.toggle('revealed');
+      }
+    });
+
+    function appendMessage(role, htmlContent) {
+      const msgDiv = document.createElement('div');
+      msgDiv.className = `msg ${role}`;
+      msgDiv.innerHTML = htmlContent;
+      messagesBox.appendChild(msgDiv);
+      messagesBox.scrollTop = messagesBox.scrollHeight;
+      return msgDiv;
+    }
+
+    async function sendRequest(formData) {
+      formData.append('session_id', sessionId);
+      const loadingMsg = appendMessage('bot', '<em>Обработка...</em>');
+
+      try {
+        const res = await fetch('/api/message', { method: 'POST', body: formData });
+        const data = await res.json();
+
+        if (data.error) {
+          loadingMsg.innerHTML = `<span style="color:var(--danger)">Ошибка: ${data.error}</span>`;
+          return;
+        }
+
+        let content = data.text_html || '';
+        if (data.audio_url) {
+          content += `<br/><audio controls src="${data.audio_url}"></audio>`;
+        }
+        loadingMsg.innerHTML = content;
+      } catch (err) {
+        loadingMsg.innerHTML = `<span style="color:var(--danger)">Ошибка соединения с сервером</span>`;
+      } finally {
+        messagesBox.scrollTop = messagesBox.scrollHeight;
+      }
+    }
+
+    function handleSendText() {
+      const text = textInput.value.trim();
+      if (!text) return;
+      appendMessage('user', text);
+      textInput.value = '';
+
+      const fd = new FormData();
+      fd.append('text', text);
+      sendRequest(fd);
+    }
+
+    sendBtn.addEventListener('click', handleSendText);
+    textInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') handleSendText();
+    });
+
+    fileInput.addEventListener('change', () => {
+      if (fileInput.files.length > 0) {
+        const file = fileInput.files[0];
+        appendMessage('user', `📎 Аудиофайл: <b>${file.name}</b>`);
+        const fd = new FormData();
+        fd.append('audio_file', file);
+        sendRequest(fd);
+        fileInput.value = '';
+      }
+    });
+
+    // Запись аудио
+    let mediaRecorder = null;
+    let audioChunks = [];
+
+    recordBtn.addEventListener('click', async () => {
+      if (mediaRecorder && mediaRecorder.state === 'recording') {
+        mediaRecorder.stop();
+        recordBtn.classList.remove('recording');
+        return;
+      }
+
+      // Проверка наличия HTTPS / Secure Context
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        alert(
+          'Запись с микрофона заблокирована браузером!\n\n' +
+          'Браузеры требуют безопасное соединение (HTTPS) для доступа к микрофону.\n' +
+          'Настройте SSL сертификат (HTTPS) или откройте сайт через http://localhost (если на этом же устройстве).'
+        );
+        return;
+      }
+
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        mediaRecorder = new MediaRecorder(stream);
+        audioChunks = [];
+
+        mediaRecorder.ondataavailable = (e) => {
+          if (e.data.size > 0) audioChunks.push(e.data);
+        };
+
+        mediaRecorder.onstop = () => {
+          const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
+          appendMessage('user', '🎤 <i>Голосовое сообщение</i>');
+          const fd = new FormData();
+          fd.append('audio_file', audioBlob, 'voice.webm');
+          sendRequest(fd);
+
+          stream.getTracks().forEach(track => track.stop());
+        };
+
+        mediaRecorder.start();
+        recordBtn.classList.add('recording');
+      } catch (err) {
+        alert('Не удалось получить доступ к микрофону: ' + err.message);
+      }
+    });
+  </script>
+</body>
+</html>
