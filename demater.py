@@ -277,27 +277,35 @@ class DeMater:
         input_file.seek(0)
 
         with wave.open(input_file, "rb") as input_wf:
-            wave_params = input_wf.getparams()
-            raw_frames = bytearray(input_wf.readframes(wave_params.nframes))
+            n_channels = input_wf.getnchannels()
+            sampwidth = input_wf.getsampwidth()
+            framerate = input_wf.getframerate()
+            n_frames = input_wf.getnframes()
+
+            raw_frames = bytearray(input_wf.readframes(n_frames))
 
             with wave.open(out_file, "wb") as wav:
-                wav.setparams(wave_params)
+                # Устанавливаем параметры по отдельности без nframes,
+                # чтобы wave.writeframes сам рассчитал корректный размер
+                wav.setnchannels(n_channels)
+                wav.setsampwidth(sampwidth)
+                wav.setframerate(framerate)
 
-                beep_data = self.get_beep_audio(wave_params.framerate, session_id)
+                beep_data = self.get_beep_audio(framerate, session_id)
+                frame_bytes = sampwidth * n_channels
 
                 for detected_word in detected_word_list:
                     start = max(0.0, detected_word["start"] - padding)
                     end = detected_word["end"] + padding
 
-                    start_idx = int(start * wave_params.framerate) * wave_params.sampwidth
-                    end_idx = int(end * wave_params.framerate) * wave_params.sampwidth
+                    start_idx = int(start * framerate) * frame_bytes
+                    end_idx = int(end * framerate) * frame_bytes
 
-                    start_idx = max(0, min(start_idx, len(raw_frames))) // 2 * 2
-                    end_idx = max(0, min(end_idx, len(raw_frames))) // 2 * 2
+                    start_idx = max(0, min(start_idx, len(raw_frames))) // frame_bytes * frame_bytes
+                    end_idx = max(0, min(end_idx, len(raw_frames))) // frame_bytes * frame_bytes
 
                     replace_len = end_idx - start_idx
-                    if replace_len > 0:
-                        # Повторяем бип, если интервал длиннее сэмпла
+                    if replace_len > 0 and len(beep_data) > 0:
                         filler = (beep_data * ((replace_len // len(beep_data)) + 1))[:replace_len]
                         raw_frames[start_idx:end_idx] = filler
 

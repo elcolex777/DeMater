@@ -4,7 +4,6 @@ import re
 import subprocess
 import uuid
 
-from cachetools import TTLCache
 from fastapi import FastAPI, File, Form, UploadFile
 from fastapi.concurrency import run_in_threadpool
 from fastapi.middleware.cors import CORSMiddleware
@@ -31,9 +30,8 @@ demater = DeMater(
     enable_whisper=False,
 )
 
-# Ограничиваем кэш в памяти: максимум 50 файлов, хранятся 10 минут (600 сек)
-audio_cache: TTLCache = TTLCache(maxsize=50, ttl=600)
-
+# Обычный in-memory словарь: файлы удаляются сразу после воспроизведения/скачивания
+audio_cache: dict[str, bytes] = {}
 
 def markdown_spoiler_to_html(text: str) -> str:
     cleaned = text.replace(r"\|", "|")
@@ -186,9 +184,14 @@ async def handle_message(
 
 @app.get("/api/audio/{audio_id}")
 async def get_audio(audio_id: str):
-    if audio_id not in audio_cache:
-        return JSONResponse(status_code=404, content={"error": "Audio not found or expired"})
-    return StreamingResponse(io.BytesIO(audio_cache[audio_id]), media_type="audio/wav")
+    # .pop удаляет элемент из словаря и сразу освобождает память под аудио
+    audio_data = audio_cache.pop(audio_id, None)
+    if audio_data is None:
+        return JSONResponse(
+            status_code=404, 
+            content={"error": "Audio not found or already consumed"}
+        )
+    return StreamingResponse(io.BytesIO(audio_data), media_type="audio/wav")
 
 
 @app.get("/", response_class=HTMLResponse)
