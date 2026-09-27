@@ -3,6 +3,7 @@ vosk
 python-telegram-bot
 soundfile
 numpy
+faster-whisper
 torch
 torchvision
 torchaudio
