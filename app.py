@@ -2,6 +2,7 @@ import io
 import os
 import re
 import subprocess
+import time
 import uuid
 
 from fastapi import FastAPI, File, Form, UploadFile
@@ -21,7 +22,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Конфигурация движков: Vosk и Whisper Fast активны, стандартный Transformers Whisper отключен
+# Конфигурация движков
 model_path = os.environ.get("DEMATBOT_MODEL_PATH", "models/vosk-model-small-ru-0.22")
 demater = DeMater(
     vosk_model_path=model_path,
@@ -30,8 +31,18 @@ demater = DeMater(
     enable_whisper=False,
 )
 
-# Обычный in-memory словарь: файлы удаляются сразу после воспроизведения/скачивания
-audio_cache: dict[str, bytes] = {}
+# Кэш аудио с временными метками для возможности повторного скачивания/прослушивания
+# Структура: {audio_id: (bytes_data, timestamp)}
+audio_cache: dict[str, tuple[bytes, float]] = {}
+CACHE_TTL_SECONDS = 3600  # Хранить файлы в течение 1 часа
+
+
+def cleanup_cache():
+    now = time.time()
+    expired = [k for k, (_, ts) in audio_cache.items() if now - ts > CACHE_TTL_SECONDS]
+    for k in expired:
+        audio_cache.pop(k, None)
+
 
 def markdown_spoiler_to_html(text: str) -> str:
     cleaned = text.replace(r"\|", "|")
@@ -44,14 +55,15 @@ def markdown_spoiler_to_html(text: str) -> str:
 
 
 def convert_audio_to_wav(input_bytes: bytes) -> io.BytesIO:
+    """Извлекает и конвертирует аудио (включая видео-контейнеры) в 16kHz mono WAV."""
     cmd = [
         "ffmpeg",
         "-i", "pipe:0",
+        "-vn",                 # Игнорировать видеопоток
         "-f", "wav",
-        "-ar", "16000",
-        "-ac", "1",
+        "-ar", "16000",        # Частота 16 kHz для Whisper/Vosk
+        "-ac", "1",            # Моно
         "-acodec", "pcm_s16le",
-        "-vn",
         "pipe:1",
     ]
 
@@ -77,20 +89,28 @@ async def handle_message(
     text: str = Form(None),
     audio_file: UploadFile = File(None),
 ):
-    # --- ОБРАБОТКА АУДИО ---
+    cleanup_cache()
+
+    # --- ОБРАБОТКА АУДИО И ВИДЕО ---
     if audio_file:
         content = await audio_file.read()
         try:
+            # Конвертируем входные байты (аудио или видео) в нужный WAV-формат
             wav_buffer = await run_in_threadpool(convert_audio_to_wav, content)
         except Exception as e:
             return JSONResponse(
                 status_code=400,
-                content={"error": f"Ошибка конвертации аудио: {str(e)}"},
+                content={"error": f"Ошибка обработки медиафайла: {str(e)}"},
             )
+
+        # Сохраняем оригинальный нормализованный звук для воспроизведения
+        original_audio_id = str(uuid.uuid4())
+        audio_cache[original_audio_id] = (wav_buffer.getvalue(), time.time())
+        wav_buffer.seek(0)
 
         targetwords = demater.get_target_word_list_or_default(session_id=session_id)
 
-        # Выполняем в тредпуле, чтобы не блокировать FastAPI Event Loop
+        # Выполняем цензурирование
         result = await run_in_threadpool(
             demater.process,
             input_file=wav_buffer,
@@ -98,10 +118,10 @@ async def handle_message(
             session_id=session_id,
         )
 
-        audio_id = str(uuid.uuid4())
-        audio_cache[audio_id] = result["out_file"].getvalue()
+        processed_audio_id = str(uuid.uuid4())
+        audio_cache[processed_audio_id] = (result["out_file"].getvalue(), time.time())
 
-        # Динамическое формирование HTML только для включенных движков
+        # Формирование текстового отчета
         blocks = []
         for _, method_info in result.get("methods", {}).items():
             name = method_info["name"]
@@ -116,7 +136,8 @@ async def handle_message(
         return {
             "type": "audio",
             "text_html": formatted_msg,
-            "audio_url": f"/api/audio/{audio_id}",
+            "audio_url": f"/api/audio/{processed_audio_id}",
+            "original_audio_url": f"/api/audio/{original_audio_id}",
         }
 
     # --- ОБРАБОТКА ТЕКСТА И КОМАНД ---
@@ -130,7 +151,7 @@ async def handle_message(
             "text_html": (
                 "<b>Привет!</b><br/>"
                 "Этот сервис запикивает части аудио с матом.<br/>"
-                "Вы можете отправить текст, загрузить аудиофайл или записать голосовое сообщение прямо с микрофона.<br/><br/>"
+                "Вы можете отправить текст, загрузить аудио/видеофайл или записать голосовое сообщение прямо с микрофона.<br/><br/>"
                 "<b>Доступные команды:</b><br/>"
                 "<code>/targetwords</code> — посмотреть список слов<br/>"
                 "<code>/targetwords_set слово1 слово2</code> — задать свой список слов<br/>"
@@ -184,14 +205,18 @@ async def handle_message(
 
 @app.get("/api/audio/{audio_id}")
 async def get_audio(audio_id: str):
-    # .pop удаляет элемент из словаря и сразу освобождает память под аудио
-    audio_data = audio_cache.pop(audio_id, None)
-    if audio_data is None:
+    item = audio_cache.get(audio_id)
+    if item is None:
         return JSONResponse(
             status_code=404, 
-            content={"error": "Audio not found or already consumed"}
+            content={"error": "Audio not found or expired"}
         )
-    return StreamingResponse(io.BytesIO(audio_data), media_type="audio/wav")
+    audio_data, _ = item
+    return StreamingResponse(
+        io.BytesIO(audio_data), 
+        media_type="audio/wav",
+        headers={"Content-Disposition": f"inline; filename={audio_id}.wav"}
+    )
 
 
 @app.get("/", response_class=HTMLResponse)

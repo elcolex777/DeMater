@@ -13,6 +13,7 @@
       --text: #f5f5f5;
       --text-muted: #798b9b;
       --accent: #5288c1;
+      --accent-hover: #6ab2f2;
       --danger: #e53935;
     }
     * { 
@@ -23,7 +24,7 @@
     }
     html, body {
       height: 100%;
-      height: 100dvh; /* Решение проблемы мобильного скролла */
+      height: 100dvh;
       background: var(--bg);
       color: var(--text);
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
@@ -93,9 +94,44 @@
       user-select: text;
     }
 
+    /* Кликабельные команды */
+    .cmd-link {
+      color: var(--accent);
+      text-decoration: underline;
+      cursor: pointer;
+      font-weight: 500;
+      transition: color 0.2s;
+    }
+    .cmd-link:hover {
+      color: var(--accent-hover);
+    }
+
+    /* Блоки с аудио */
+    .audio-block {
+      margin-top: 10px;
+      padding: 8px 10px;
+      background: rgba(0, 0, 0, 0.2);
+      border-radius: 8px;
+    }
+    .audio-block-title {
+      font-size: 0.8rem;
+      color: var(--text-muted);
+      margin-bottom: 4px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .audio-block-title a {
+      color: var(--accent);
+      text-decoration: none;
+      font-size: 0.75rem;
+    }
+    .audio-block-title a:hover {
+      text-decoration: underline;
+    }
     audio {
       width: 100%;
-      margin-top: 8px;
+      height: 36px;
       border-radius: 20px;
       outline: none;
     }
@@ -108,7 +144,7 @@
       align-items: center;
       gap: 8px;
       border-top: 1px solid rgba(255,255,255,0.06);
-      flex-shrink: 0; /* Гарантирует, что блок никогда не сожмется и не скроется */
+      flex-shrink: 0;
     }
     .input-bar input[type="text"] {
       flex: 1;
@@ -148,24 +184,26 @@
   <div class="chat-container">
     <header>
       <h1>DeMater Web Chat</h1>
-      <div class="status">Цензурирование текста и аудио</div>
+      <div class="status">Цензурирование текста, аудио и видео</div>
     </header>
 
     <div class="messages" id="messages">
       <div class="msg bot">
         Привет! Я веб-версия DeMater.<br/>
-        Отправьте текст, прикрепите файл или запишите голосовое.<br/>
-        Скрытые матерные слова можно открыть кликом.
+        Отправьте текст, прикрепите аудио/видео файл или запишите голосовое.<br/>
+        Скрытые матерные слова можно открыть кликом.<br/>
+        Для получения списка всех команд нажмите <span class="cmd-link" data-cmd="/start">/start</span>.
       </div>
     </div>
 
     <div class="input-bar">
-      <button class="btn" title="Прикрепить аудиофайл" onclick="document.getElementById('fileInput').click()">
+      <button class="btn" title="Прикрепить аудио/видеофайл" onclick="document.getElementById('fileInput').click()">
         <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/>
         </svg>
       </button>
-      <input type="file" id="fileInput" accept="audio/*" />
+      <!-- Поддержка и аудио, и видео форматов -->
+      <input type="file" id="fileInput" accept="audio/*,video/*,.mp4,.mov,.mkv,.avi,.webm" />
 
       <input type="text" id="textInput" placeholder="Сообщение или команда..." autocomplete="off" />
 
@@ -200,17 +238,37 @@
     const fileInput = document.getElementById('fileInput');
     const recordBtn = document.getElementById('recordBtn');
 
-    // Делегирование кликов по спойлерам (работает для динамически добавленных сообщений)
+    // Оборачивает /команды внутри текста в кликабельные span
+    function linkifyCommands(html) {
+      return html.replace(/(^|[\s>])(\/[a-zA-Z0-9_]+)/g, (match, prefix, cmd) => {
+        return `${prefix}<span class="cmd-link" data-cmd="${cmd}">${cmd}</span>`;
+      });
+    }
+
+    // Делегирование кликов по спойлерам и командам
     messagesBox.addEventListener('click', (e) => {
+      // Спойлеры
       if (e.target && e.target.classList.contains('spoiler')) {
         e.target.classList.toggle('revealed');
+        return;
+      }
+
+      // Кликабельные команды
+      const cmdEl = e.target.closest('.cmd-link');
+      if (cmdEl) {
+        const cmd = cmdEl.getAttribute('data-cmd');
+        textInput.value = cmd + (cmd.includes('_set') || cmd.includes('_add') ? ' ' : '');
+        textInput.focus();
+        // Перемещаем курсор в конец поля
+        const len = textInput.value.length;
+        textInput.setSelectionRange(len, len);
       }
     });
 
     function appendMessage(role, htmlContent) {
       const msgDiv = document.createElement('div');
       msgDiv.className = `msg ${role}`;
-      msgDiv.innerHTML = htmlContent;
+      msgDiv.innerHTML = linkifyCommands(htmlContent);
       messagesBox.appendChild(msgDiv);
       messagesBox.scrollTop = messagesBox.scrollHeight;
       return msgDiv;
@@ -229,10 +287,33 @@
           return;
         }
 
-        let content = data.text_html || '';
+        let content = linkifyCommands(data.text_html || '');
+
+        // Вывод плееров: цензурированный и оригинальный
         if (data.audio_url) {
-          content += `<br/><audio controls src="${data.audio_url}"></audio>`;
+          content += `
+            <div class="audio-block">
+              <div class="audio-block-title">
+                <span>🎧 Зацензурированное аудио</span>
+                <a href="${data.audio_url}" download="censored.wav">Скачать</a>
+              </div>
+              <audio controls src="${data.audio_url}"></audio>
+            </div>
+          `;
         }
+
+        if (data.original_audio_url) {
+          content += `
+            <div class="audio-block">
+              <div class="audio-block-title">
+                <span>🔊 Оригинальный файл (без изменений)</span>
+                <a href="${data.original_audio_url}" download="original.wav">Скачать</a>
+              </div>
+              <audio controls src="${data.original_audio_url}"></audio>
+            </div>
+          `;
+        }
+
         loadingMsg.innerHTML = content;
       } catch (err) {
         loadingMsg.innerHTML = `<span style="color:var(--danger)">Ошибка соединения с сервером</span>`;
@@ -257,15 +338,104 @@
       if (e.key === 'Enter') handleSendText();
     });
 
-    fileInput.addEventListener('change', () => {
-      if (fileInput.files.length > 0) {
-        const file = fileInput.files[0];
+    // Извлечение звука из видео прямо в браузере (экономия трафика)
+    async function extractAudioFromVideoInBrowser(file) {
+      const arrayBuffer = await file.arrayBuffer();
+      const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      const decoded = await audioCtx.decodeAudioData(arrayBuffer);
+
+      // Конвертируем в 16 kHz Mono WAV для минимального размера
+      const targetSampleRate = 16000;
+      const offlineCtx = new OfflineAudioContext(1, Math.ceil(decoded.duration * targetSampleRate), targetSampleRate);
+      
+      const source = offlineCtx.createBufferSource();
+      source.buffer = decoded;
+      source.connect(offlineCtx.destination);
+      source.start(0);
+
+      const renderedBuffer = await offlineCtx.startRendering();
+      await audioCtx.close();
+
+      return audioBufferToWavBlob(renderedBuffer);
+    }
+
+    // Вспомогательный энкодер PCM WAV (16 kHz mono 16-bit)
+    function audioBufferToWavBlob(audioBuffer) {
+      const numOfChan = audioBuffer.numberOfChannels;
+      const length = audioBuffer.length * numOfChan * 2 + 44;
+      const outBuffer = new ArrayBuffer(length);
+      const view = new DataView(outBuffer);
+      const channels = [];
+      let sampleRate = audioBuffer.sampleRate;
+      let offset = 0;
+      let pos = 0;
+
+      function setUint16(data) { view.setUint16(pos, data, true); pos += 2; }
+      function setUint32(data) { view.setUint32(pos, data, true); pos += 4; }
+
+      // WAV заголовок
+      setUint32(0x46464952); // "RIFF"
+      setUint32(length - 8);
+      setUint32(0x45564157); // "WAVE"
+      setUint32(0x20746d66); // "fmt "
+      setUint32(16);         // Длина чанка fmt
+      setUint16(1);          // PCM
+      setUint16(numOfChan);
+      setUint32(sampleRate);
+      setUint32(sampleRate * 2 * numOfChan); // Byte rate
+      setUint16(numOfChan * 2);              // Block align
+      setUint16(16);                         // Bits per sample
+      setUint32(0x61746164); // "data"
+      setUint32(length - pos - 4);
+
+      for (let i = 0; i < audioBuffer.numberOfChannels; i++) {
+        channels.push(audioBuffer.getChannelData(i));
+      }
+
+      while (offset < audioBuffer.length) {
+        for (let i = 0; i < numOfChan; i++) {
+          let sample = Math.max(-1, Math.min(1, channels[i][offset]));
+          sample = (0.5 + sample < 0 ? sample * 32768 : sample * 32767) | 0;
+          view.setInt16(pos, sample, true);
+          pos += 2;
+        }
+        offset++;
+      }
+
+      return new Blob([view], { type: 'audio/wav' });
+    }
+
+    fileInput.addEventListener('change', async () => {
+      if (fileInput.files.length === 0) return;
+      const file = fileInput.files[0];
+      const isVideo = file.type.startsWith('video/') || /\.(mp4|mov|avi|mkv|webm)$/i.test(file.name);
+
+      if (isVideo) {
+        const loadingMsg = appendMessage('user', `🎬 Видео: <b>${file.name}</b> (извлечение звука...)`);
+        try {
+          // Извлекаем аудиодорожку на клиенте — видеопоток вообще не пойдет в сеть
+          const audioBlob = await extractAudioFromVideoInBrowser(file);
+          loadingMsg.innerHTML = `🎬 Видео: <b>${file.name}</b> (аудио оптимизировано и отправлено)`;
+
+          const fd = new FormData();
+          fd.append('audio_file', audioBlob, `${file.name}.wav`);
+          sendRequest(fd);
+        } catch (e) {
+          // Если браузер не поддерживает кодек контейнера, отправляем как есть на бэкенд ffmpeg
+          console.warn('Клиентское извлечение звука не удалось, отправка на сервер:', e);
+          loadingMsg.innerHTML = `🎬 Видео: <b>${file.name}</b> (обработка на сервере...)`;
+          const fd = new FormData();
+          fd.append('audio_file', file);
+          sendRequest(fd);
+        }
+      } else {
         appendMessage('user', `📎 Аудиофайл: <b>${file.name}</b>`);
         const fd = new FormData();
         fd.append('audio_file', file);
         sendRequest(fd);
-        fileInput.value = '';
       }
+
+      fileInput.value = '';
     });
 
     // Запись аудио
@@ -279,12 +449,11 @@
         return;
       }
 
-      // Проверка наличия HTTPS / Secure Context
       if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
         alert(
           'Запись с микрофона заблокирована браузером!\n\n' +
           'Браузеры требуют безопасное соединение (HTTPS) для доступа к микрофону.\n' +
-          'Настройте SSL сертификат (HTTPS) или откройте сайт через http://localhost (если на этом же устройстве).'
+          'Настройте SSL сертификат (HTTPS) или откройте сайт через http://localhost.'
         );
         return;
       }
