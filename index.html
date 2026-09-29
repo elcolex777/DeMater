@@ -116,18 +116,32 @@
     .audio-block-title {
       font-size: 0.8rem;
       color: var(--text-muted);
-      margin-bottom: 4px;
+      margin-bottom: 6px;
       display: flex;
       justify-content: space-between;
       align-items: center;
+      gap: 8px;
     }
-    .audio-block-title a {
+    .audio-block-actions {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .audio-block-actions a,
+    .audio-block-actions button {
       color: var(--accent);
       text-decoration: none;
       font-size: 0.75rem;
+      background: none;
+      border: none;
+      padding: 0;
+      cursor: pointer;
+      font-family: inherit;
     }
-    .audio-block-title a:hover {
+    .audio-block-actions a:hover,
+    .audio-block-actions button:hover {
       text-decoration: underline;
+      color: var(--accent-hover);
     }
     audio {
       width: 100%;
@@ -178,6 +192,34 @@
       to { transform: scale(1.15); }
     }
     #fileInput { display: none; }
+
+    /* Всплывающее меню при выделении текста */
+    .selection-tooltip {
+      position: fixed;
+      display: none;
+      z-index: 99999;
+      background: var(--bubble-in);
+      border: 1px solid var(--accent);
+      border-radius: 8px;
+      padding: 8px 14px;
+      box-shadow: 0 6px 18px rgba(0, 0, 0, 0.6);
+      cursor: pointer;
+      user-select: none;
+      -webkit-user-select: none;
+      touch-action: manipulation;
+    }
+    .selection-tooltip-btn {
+      color: #fff;
+      font-size: 0.85rem;
+      font-weight: 500;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      pointer-events: none;
+    }
+    .selection-tooltip:active {
+      background: var(--bubble-out);
+    }
   </style>
 </head>
 <body>
@@ -202,7 +244,6 @@
           <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/>
         </svg>
       </button>
-      <!-- Поддержка и аудио, и видео форматов -->
       <input type="file" id="fileInput" accept="audio/*,video/*,.mp4,.mov,.mkv,.avi,.webm" />
 
       <input type="text" id="textInput" placeholder="Сообщение или команда..." autocomplete="off" />
@@ -222,6 +263,17 @@
           <polygon points="22 2 15 22 11 13 2 9 22 2"/>
         </svg>
       </button>
+    </div>
+  </div>
+
+  <!-- Всплывающий тултип при выделении текста -->
+  <div id="selectionTooltip" class="selection-tooltip">
+    <div class="selection-tooltip-btn">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <line x1="12" y1="5" x2="12" y2="19"></line>
+        <line x1="5" y1="12" x2="19" y2="12"></line>
+      </svg>
+      Добавить слова в список
     </div>
   </div>
 
@@ -259,7 +311,6 @@
         const cmd = cmdEl.getAttribute('data-cmd');
         textInput.value = cmd + (cmd.includes('_set') || cmd.includes('_add') ? ' ' : '');
         textInput.focus();
-        // Перемещаем курсор в конец поля
         const len = textInput.value.length;
         textInput.setSelectionRange(len, len);
       }
@@ -289,15 +340,18 @@
 
         let content = linkifyCommands(data.text_html || '');
 
-        // Вывод плееров: цензурированный и оригинальный
+        // Вывод плееров с кнопками Скачать и Отправить еще раз
         if (data.audio_url) {
           content += `
             <div class="audio-block">
               <div class="audio-block-title">
                 <span>🎧 Зацензурированное аудио</span>
-                <a href="${data.audio_url}" download="censored.wav">Скачать</a>
+                <div class="audio-block-actions">
+                  <button type="button" onclick="resendAudio('${data.audio_url}', 'censored_resend.wav')">Отправить еще раз</button>
+                  <a href="${data.audio_url}" download="censored.wav">Скачать</a>
+                </div>
               </div>
-              <audio controls src="${data.audio_url}"></audio>
+              <audio controls preload="metadata" src="${data.audio_url}"></audio>
             </div>
           `;
         }
@@ -307,9 +361,12 @@
             <div class="audio-block">
               <div class="audio-block-title">
                 <span>🔊 Оригинальный файл (без изменений)</span>
-                <a href="${data.original_audio_url}" download="original.wav">Скачать</a>
+                <div class="audio-block-actions">
+                  <button type="button" onclick="resendAudio('${data.original_audio_url}', 'original_resend.wav')">Отправить еще раз</button>
+                  <a href="${data.original_audio_url}" download="original.wav">Скачать</a>
+                </div>
               </div>
-              <audio controls src="${data.original_audio_url}"></audio>
+              <audio controls preload="metadata" src="${data.original_audio_url}"></audio>
             </div>
           `;
         }
@@ -319,6 +376,23 @@
         loadingMsg.innerHTML = `<span style="color:var(--danger)">Ошибка соединения с сервером</span>`;
       } finally {
         messagesBox.scrollTop = messagesBox.scrollHeight;
+      }
+    }
+
+    // Повторная отправка аудиофайла на обработку
+    async function resendAudio(audioUrl, fileName) {
+      appendMessage('user', `🔁 Повторная отправка аудио: <b>${fileName}</b>`);
+      try {
+        const response = await fetch(audioUrl);
+        if (!response.ok) {
+          throw new Error('Файл не найден или истек срок его хранения');
+        }
+        const blob = await response.blob();
+        const fd = new FormData();
+        fd.append('audio_file', blob, fileName);
+        sendRequest(fd);
+      } catch (err) {
+        appendMessage('bot', `<span style="color:var(--danger)">Ошибка при повторной отправке: ${err.message}</span>`);
       }
     }
 
@@ -344,7 +418,6 @@
       const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
       const decoded = await audioCtx.decodeAudioData(arrayBuffer);
 
-      // Конвертируем в 16 kHz Mono WAV для минимального размера
       const targetSampleRate = 16000;
       const offlineCtx = new OfflineAudioContext(1, Math.ceil(decoded.duration * targetSampleRate), targetSampleRate);
       
@@ -413,7 +486,6 @@
       if (isVideo) {
         const loadingMsg = appendMessage('user', `🎬 Видео: <b>${file.name}</b> (извлечение звука...)`);
         try {
-          // Извлекаем аудиодорожку на клиенте — видеопоток вообще не пойдет в сеть
           const audioBlob = await extractAudioFromVideoInBrowser(file);
           loadingMsg.innerHTML = `🎬 Видео: <b>${file.name}</b> (аудио оптимизировано и отправлено)`;
 
@@ -421,7 +493,6 @@
           fd.append('audio_file', audioBlob, `${file.name}.wav`);
           sendRequest(fd);
         } catch (e) {
-          // Если браузер не поддерживает кодек контейнера, отправляем как есть на бэкенд ffmpeg
           console.warn('Клиентское извлечение звука не удалось, отправка на сервер:', e);
           loadingMsg.innerHTML = `🎬 Видео: <b>${file.name}</b> (обработка на сервере...)`;
           const fd = new FormData();
@@ -481,6 +552,114 @@
         recordBtn.classList.add('recording');
       } catch (err) {
         alert('Не удалось получить доступ к микрофону: ' + err.message);
+      }
+    });
+
+    // --- Всплывающее меню при выделении текста ---
+    const selectionTooltip = document.getElementById('selectionTooltip');
+    let selectedTextValue = '';
+    let isInteractingWithTooltip = false;
+
+    function hideTooltip() {
+      if (isInteractingWithTooltip) return;
+      selectionTooltip.style.display = 'none';
+      selectedTextValue = '';
+    }
+
+    function checkSelection() {
+      setTimeout(() => {
+        const selection = window.getSelection();
+        const text = selection ? selection.toString().trim() : '';
+
+        if (!text || (document.activeElement && document.activeElement.tagName === 'INPUT')) {
+          hideTooltip();
+          return;
+        }
+
+        if (selection.rangeCount > 0) {
+          const range = selection.getRangeAt(0);
+          const rect = range.getBoundingClientRect();
+
+          if (rect.width === 0 && rect.height === 0) {
+            hideTooltip();
+            return;
+          }
+
+          selectedTextValue = text;
+
+          selectionTooltip.style.visibility = 'hidden';
+          selectionTooltip.style.display = 'block';
+          const tooltipWidth = selectionTooltip.offsetWidth;
+          const tooltipHeight = selectionTooltip.offsetHeight;
+          selectionTooltip.style.visibility = 'visible';
+
+          // Размещаем ПОД фразой с отступом 10px (чтобы не перекрывалось системным меню)
+          let top = rect.bottom + 10;
+          let left = rect.left + (rect.width / 2) - (tooltipWidth / 2);
+
+          // Если снизу экрана нет места — поднимаем наверх
+          if (top + tooltipHeight > window.innerHeight - 60) {
+            top = rect.top - tooltipHeight - 10;
+          }
+
+          // Границы экрана
+          if (left < 10) left = 10;
+          if (left + tooltipWidth > window.innerWidth - 10) {
+            left = window.innerWidth - tooltipWidth - 10;
+          }
+
+          selectionTooltip.style.left = `${left}px`;
+          selectionTooltip.style.top = `${top}px`;
+        }
+      }, 50);
+    }
+
+    document.addEventListener('mouseup', checkSelection);
+    document.addEventListener('touchend', checkSelection);
+
+    messagesBox.addEventListener('scroll', hideTooltip, { passive: true });
+
+    function applySelectedWords(e) {
+      if (e) {
+        e.preventDefault();
+        e.stopPropagation();
+      }
+      if (!selectedTextValue) return;
+
+      const formattedText = selectedTextValue.replace(/\s+/g, ' ');
+
+      textInput.value = `/targetwords_add ${formattedText}`;
+
+      if (window.getSelection) {
+        window.getSelection().removeAllRanges();
+      }
+
+      isInteractingWithTooltip = false;
+      selectionTooltip.style.display = 'none';
+      selectedTextValue = '';
+
+      setTimeout(() => {
+        textInput.focus();
+        const len = textInput.value.length;
+        textInput.setSelectionRange(len, len);
+      }, 10);
+    }
+
+    selectionTooltip.addEventListener('mousedown', (e) => {
+      e.preventDefault();
+      isInteractingWithTooltip = true;
+    });
+
+    selectionTooltip.addEventListener('touchstart', (e) => {
+      isInteractingWithTooltip = true;
+    }, { passive: true });
+
+    selectionTooltip.addEventListener('click', applySelectedWords);
+
+    document.addEventListener('mousedown', (e) => {
+      if (!selectionTooltip.contains(e.target)) {
+        isInteractingWithTooltip = false;
+        hideTooltip();
       }
     });
   </script>

@@ -203,8 +203,10 @@ async def handle_message(
     }
 
 
+from fastapi import Request, Response, status
+
 @app.get("/api/audio/{audio_id}")
-async def get_audio(audio_id: str):
+async def get_audio(audio_id: str, request: Request):
     item = audio_cache.get(audio_id)
     if item is None:
         return JSONResponse(
@@ -212,10 +214,45 @@ async def get_audio(audio_id: str):
             content={"error": "Audio not found or expired"}
         )
     audio_data, _ = item
-    return StreamingResponse(
-        io.BytesIO(audio_data), 
+    file_size = len(audio_data)
+    range_header = request.headers.get("range")
+
+    headers = {
+        "Accept-Ranges": "bytes",
+        "Content-Disposition": f"inline; filename={audio_id}.wav",
+    }
+
+    # Если клиент (Safari/iPad) запросил диапазон байт
+    if range_header:
+        try:
+            # Формат заголовка: "bytes=start-end"
+            range_value = range_header.strip().split("=")[-1]
+            start_str, end_str = range_value.split("-")
+            
+            start = int(start_str) if start_str else 0
+            end = int(end_str) if end_str else file_size - 1
+            end = min(end, file_size - 1)
+            
+            chunk_length = end - start + 1
+            headers["Content-Range"] = f"bytes {start}-{end}/{file_size}"
+            headers["Content-Length"] = str(chunk_length)
+            
+            return Response(
+                content=audio_data[start : end + 1],
+                status_code=status.HTTP_206_PARTIAL_CONTENT,
+                headers=headers,
+                media_type="audio/wav",
+            )
+        except Exception:
+            pass
+
+    # Обычный ответ, если Range не передан
+    headers["Content-Length"] = str(file_size)
+    return Response(
+        content=audio_data,
+        status_code=status.HTTP_200_OK,
+        headers=headers,
         media_type="audio/wav",
-        headers={"Content-Disposition": f"inline; filename={audio_id}.wav"}
     )
 
 
