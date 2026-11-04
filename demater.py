@@ -124,14 +124,10 @@ class DeMater:
         return custom if custom != "" else self.target_word_list_default
 
     def save_user_suggested_words(self, words: List[str]) -> List[str]:
-        """
-        Сохраняет новые уникальные слова пользователей в файл на диске
-        для последующей ручной модерации и обновления основного words.txt.
-        """
+        """Сохраняет новые уникальные слова пользователей в файл user_added_words.txt."""
         if not words:
             return []
 
-        # Читаем уже существующие слова в основном словаре и в файле предложенных
         known_words = {
             w.strip().lower() for w in self.target_word_list_default.split(",") if w.strip()
         }
@@ -400,11 +396,14 @@ class DeMater:
         lead_in_sec: float = 0.07,
         lead_out_sec: float = 0.07,
         min_beep_duration: float = 0.12,
+        short_word_threshold: float = 0.210,
+        short_word_beep_duration: float = 0.250,
         fade_sec: float = 0.008,
     ) -> io.BytesIO:
         """
-        Заменяет запрещенные отрезки аудио на звук запикивания с сохранением 
-        начального звука слова и асимметричным сжатием конца для коротких слов.
+        Заменяет запрещенные отрезки аудио на звук запикивания.
+        Для коротких слов (< short_word_threshold) расширяет звук запикивания
+        до short_word_beep_duration с сохранением разборчивого начала слова.
         """
         out_file = io.BytesIO()
         input_file.seek(0)
@@ -414,6 +413,7 @@ class DeMater:
             sampwidth = input_wf.getsampwidth()
             framerate = input_wf.getframerate()
             n_frames = input_wf.getnframes()
+            total_audio_duration = n_frames / float(framerate)
 
             raw_bytes = input_wf.readframes(n_frames)
 
@@ -436,10 +436,13 @@ class DeMater:
                 w_end = detected_word["end"]
                 total_duration = max(0.0, w_end - w_start)
 
-                # --- АСИММЕТРИЧНЫЙ РАСЧЕТ ОТСТУПОВ ---
-                if total_duration <= min_beep_duration:
-                    eff_lead_in = min(0.035, total_duration * 0.25)
-                    eff_lead_out = 0.0
+                # --- ЛОГИКА ДЛЯ КОРОТКИХ СЛОВ (< short_word_threshold) ---
+                if total_duration < short_word_threshold:
+                    eff_lead_in = min(lead_in_sec, max(0.035, total_duration * 0.25))
+                    beep_start = w_start + eff_lead_in
+                    beep_end = min(total_audio_duration, beep_start + short_word_beep_duration)
+
+                # --- СТАНДАРТНАЯ ЛОГИКА ДЛЯ СЛОВ НОРМАЛЬНОЙ ДЛИНЫ ---
                 else:
                     eff_lead_in = lead_in_sec
                     rem_after_lead_in = total_duration - eff_lead_in
@@ -450,8 +453,8 @@ class DeMater:
                     else:
                         eff_lead_out = max(0.0, min(lead_out_sec, rem_after_lead_in - min_beep_duration))
 
-                beep_start = w_start + eff_lead_in
-                beep_end = max(beep_start, w_end - eff_lead_out)
+                    beep_start = w_start + eff_lead_in
+                    beep_end = max(beep_start, w_end - eff_lead_out)
 
                 start_sample = int(beep_start * framerate) * n_channels
                 end_sample = int(beep_end * framerate) * n_channels
@@ -528,10 +531,22 @@ class DeMater:
         session_id: Optional[str] = None,
         lead_in_sec: Optional[float] = None,
         lead_out_sec: Optional[float] = None,
+        short_word_threshold: Optional[float] = None,
+        short_word_beep_duration: Optional[float] = None,
     ) -> dict:
         user_cfg = self.get_user_data_or_new(session_id) if session_id else {}
         cfg_lead_in = lead_in_sec if lead_in_sec is not None else user_cfg.get("lead_in_sec", 0.07)
         cfg_lead_out = lead_out_sec if lead_out_sec is not None else user_cfg.get("lead_out_sec", 0.07)
+        cfg_short_thresh = (
+            short_word_threshold
+            if short_word_threshold is not None
+            else user_cfg.get("short_word_threshold", 0.210)
+        )
+        cfg_short_beep = (
+            short_word_beep_duration
+            if short_word_beep_duration is not None
+            else user_cfg.get("short_word_beep_duration", 0.250)
+        )
 
         target_words_raw = target_words if target_words is not None else self.target_word_list_default
         target_word_set = {
@@ -611,6 +626,8 @@ class DeMater:
             session_id=session_id,
             lead_in_sec=cfg_lead_in,
             lead_out_sec=cfg_lead_out,
+            short_word_threshold=cfg_short_thresh,
+            short_word_beep_duration=cfg_short_beep,
         )
 
         return {

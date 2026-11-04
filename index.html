@@ -580,7 +580,7 @@
       const cmdEl = e.target.closest('.cmd-link');
       if (cmdEl) {
         const cmd = cmdEl.getAttribute('data-cmd');
-        textInput.value = cmd + (cmd.includes('_set') || cmd.includes('_add') || cmd.includes('_margins') ? ' ' : '');
+        textInput.value = cmd + (cmd.includes('_set') || cmd.includes('_add') || cmd.includes('_margins') || cmd.includes('_short') ? ' ' : '');
         textInput.focus();
         const len = textInput.value.length;
         textInput.setSelectionRange(len, len);
@@ -875,6 +875,7 @@
     document.addEventListener('touchend', checkSelection);
     messagesBox.addEventListener('scroll', hideTooltip, { passive: true });
 
+    // Добавление слов в команду через пробел без перезаписи уже набранного текста
     function applySelectedWords(e) {
       if (e) {
         e.preventDefault();
@@ -884,11 +885,9 @@
 
       const formattedText = selectedTextValue.replace(/\s+/g, ' ').trim();
       const currentVal = textInput.value.trim();
-
       const cmdPrefix = '/targetwords_add';
 
       if (currentVal.startsWith(cmdPrefix)) {
-        // Проверяем существующие токены, чтобы не добавлять одно и то же слово дважды подряд
         const existingWords = currentVal.substring(cmdPrefix.length).trim().split(/\s+/);
         const newWords = formattedText.split(/\s+/).filter(w => !existingWords.includes(w));
 
@@ -896,7 +895,6 @@
           textInput.value = `${currentVal} ${newWords.join(' ')}`;
         }
       } else {
-        // Если поле было пустым или содержало другой ввод
         textInput.value = `${cmdPrefix} ${formattedText}`;
       }
 

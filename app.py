@@ -35,9 +35,9 @@ demater = DeMater(
 # Кэш аудио: {audio_id: {"data": bytes, "first_accessed_at": Optional[float], "created_at": float}}
 audio_cache: dict[str, dict] = {}
 
-# Время жизни файла после первого обращения: увеличено до 20 минут
-ACCESS_GRACE_PERIOD_SEC = 20 * 60  # 1200 секунд
-# Время жизни невостребованного файла в кэше
+# Время жизни файла после первого обращения: 20 минут (1200 секунд)
+ACCESS_GRACE_PERIOD_SEC = 20 * 60
+# Время жизни невостребованного файла в кэше (30 минут)
 UNACCESSED_TTL_SEC = 1800
 
 
@@ -158,6 +158,8 @@ async def handle_message(
     audio_file: UploadFile = File(None),
     lead_in: Optional[float] = Form(None),
     lead_out: Optional[float] = Form(None),
+    short_thresh: Optional[float] = Form(None),
+    short_beep: Optional[float] = Form(None),
 ):
     cleanup_audio_cache()
 
@@ -189,6 +191,8 @@ async def handle_message(
             session_id=session_id,
             lead_in_sec=lead_in,
             lead_out_sec=lead_out,
+            short_word_threshold=short_thresh,
+            short_word_beep_duration=short_beep,
         )
 
         processed_audio_id = str(uuid.uuid4())
@@ -237,7 +241,8 @@ async def handle_message(
                 "<code>/sounds</code> — список звуков запикивания<br/>"
                 "<code>/sound_set &lt;id&gt;</code> — переключить звук (например: <code>/sound_set silence</code>)<br/>"
                 "<code>/sound_reset</code> — вернуть стандартный пик<br/>"
-                "<code>/beep_margins 0.07 0.07</code> — настроить отступы оригинального звука (начало/конец в сек)"
+                "<code>/beep_margins 0.07 0.07</code> — отступы оригинального звука (начало/конец в сек)<br/>"
+                "<code>/beep_short 0.210 0.250</code> — порог короткого слова и длина запикивания"
             ),
         }
 
@@ -255,7 +260,7 @@ async def handle_message(
         snd_id = text.replace("/sound_set", "").strip()
         if demater.set_user_sound(session_id, snd_id):
             return {"type": "text", "text_html": f"Звук запикивания изменен на: <b>{snd_id}</b>"}
-        return {"type": "text", "text_html": f"Звук <code>{snd_id}</code> не найден. Введите <code>/sounds</code> для просмотра списка."}
+        return {"type": "text", "text_html": f"Звук <code>{snd_id}</code> не найден. Введите <code>/sounds</code> для списка."}
 
     if text.startswith("/sound_reset"):
         demater.set_user_sound(session_id, "default")
@@ -280,7 +285,30 @@ async def handle_message(
             "type": "text",
             "text_html": (
                 f"Текущие отступы: в начале <b>{curr_in} с</b>, в конце <b>{curr_out} с</b>.<br/>"
-                "Формат команды: <code>/beep_margins 0.08 0.08</code>"
+                "Формат команды: <code>/beep_margins 0.07 0.07</code>"
+            ),
+        }
+
+    if text.startswith("/beep_short"):
+        parts = text.split()
+        user_dict = demater.get_user_data_or_new(session_id)
+        if len(parts) >= 3:
+            try:
+                user_dict["short_word_threshold"] = float(parts[1])
+                user_dict["short_word_beep_duration"] = float(parts[2])
+                return {
+                    "type": "text",
+                    "text_html": f"Настройки коротких слов сохранены: порог <b>{parts[1]} с</b>, длина запикивания <b>{parts[2]} с</b>.",
+                }
+            except ValueError:
+                pass
+        curr_th = user_dict.get("short_word_threshold", 0.210)
+        curr_dur = user_dict.get("short_word_beep_duration", 0.250)
+        return {
+            "type": "text",
+            "text_html": (
+                f"Текущие настройки коротких слов: порог <b>{curr_th} с</b>, длина запикивания <b>{curr_dur} с</b>.<br/>"
+                "Формат команды: <code>/beep_short 0.210 0.250</code>"
             ),
         }
 
