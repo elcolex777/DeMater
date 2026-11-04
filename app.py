@@ -4,11 +4,12 @@ import re
 import subprocess
 import time
 import uuid
+from typing import Optional
 
-from fastapi import FastAPI, File, Form, UploadFile
+from fastapi import FastAPI, File, Form, Request, Response, UploadFile, status
 from fastapi.concurrency import run_in_threadpool
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 
 from demater import DeMater
 
@@ -31,17 +32,8 @@ demater = DeMater(
     enable_whisper=False,
 )
 
-# Кэш аудио с временными метками для возможности повторного скачивания/прослушивания
-# Структура: {audio_id: (bytes_data, timestamp)}
-audio_cache: dict[str, tuple[bytes, float]] = {}
-CACHE_TTL_SECONDS = 3600  # Хранить файлы в течение 1 часа
-
-
-def cleanup_cache():
-    now = time.time()
-    expired = [k for k, (_, ts) in audio_cache.items() if now - ts > CACHE_TTL_SECONDS]
-    for k in expired:
-        audio_cache.pop(k, None)
+# Одноразовый кэш аудио: {audio_id: bytes_data}
+audio_cache: dict[str, bytes] = {}
 
 
 def markdown_spoiler_to_html(text: str) -> str:
@@ -83,19 +75,75 @@ def convert_audio_to_wav(input_bytes: bytes) -> io.BytesIO:
     return wav_buffer
 
 
+# --- ЭНДПОИНТЫ УПРАВЛЕНИЯ ЗВУКАМИ ---
+
+@app.get("/api/sounds")
+async def list_sounds(session_id: str):
+    """Список всех доступных звуков и статус активности для session_id."""
+    sounds = demater.get_available_sounds(session_id=session_id)
+    return {"sounds": sounds}
+
+
+@app.post("/api/sounds/select")
+async def select_sound(session_id: str = Form(...), sound_id: str = Form(...)):
+    """Выбрать текущий звук для сессии."""
+    ok = demater.set_user_sound(session_id, sound_id)
+    if not ok:
+        return JSONResponse(status_code=400, content={"error": "Звук не найден"})
+    return {"status": "ok", "selected_sound_id": sound_id}
+
+
+@app.post("/api/sounds/upload")
+async def upload_sound(
+    session_id: str = Form(...),
+    name: str = Form(...),
+    sound_file: UploadFile = File(...),
+):
+    """Загрузка нового пользовательского звука (кряканье, гудок, утка и т.д.)."""
+    content = await sound_file.read()
+    try:
+        sound_id = await run_in_threadpool(demater.register_custom_sound, name, content)
+        demater.set_user_sound(session_id, sound_id)
+        return {"status": "ok", "sound_id": sound_id, "name": name}
+    except Exception as e:
+        return JSONResponse(status_code=400, content={"error": f"Ошибка сохранения звука: {str(e)}"})
+
+
+@app.get("/api/sounds/{sound_id}/preview")
+async def preview_sound(sound_id: str):
+    """Предпрослушивание звука запикивания."""
+    if sound_id == "silence":
+        return Response(content=b"", media_type="audio/wav")
+
+    file_path = demater.custom_beeps_dir / f"{sound_id}.wav"
+    if not file_path.exists():
+        if sound_id == "default":
+            file_path = os.path.join("data", "censor-beep-2-16000.wav")
+            if not os.path.exists(file_path):
+                file_path = os.path.join("data", "censor-beep-2-2.wav")
+            if not os.path.exists(file_path):
+                return Response(content=b"\x00" * 32000, media_type="audio/wav")
+            with open(file_path, "rb") as f:
+                return Response(content=f.read(), media_type="audio/wav")
+        return JSONResponse(status_code=404, content={"error": "Файл не найден"})
+
+    return Response(content=file_path.read_bytes(), media_type="audio/wav")
+
+
+# --- ОСНОВНАЯ ОБРАБОТКА СООБЩЕНИЙ ---
+
 @app.post("/api/message")
 async def handle_message(
     session_id: str = Form(...),
     text: str = Form(None),
     audio_file: UploadFile = File(None),
+    lead_in: Optional[float] = Form(None),
+    lead_out: Optional[float] = Form(None),
 ):
-    cleanup_cache()
-
     # --- ОБРАБОТКА АУДИО И ВИДЕО ---
     if audio_file:
         content = await audio_file.read()
         try:
-            # Конвертируем входные байты (аудио или видео) в нужный WAV-формат
             wav_buffer = await run_in_threadpool(convert_audio_to_wav, content)
         except Exception as e:
             return JSONResponse(
@@ -103,23 +151,23 @@ async def handle_message(
                 content={"error": f"Ошибка обработки медиафайла: {str(e)}"},
             )
 
-        # Сохраняем оригинальный нормализованный звук для воспроизведения
         original_audio_id = str(uuid.uuid4())
-        audio_cache[original_audio_id] = (wav_buffer.getvalue(), time.time())
+        audio_cache[original_audio_id] = wav_buffer.getvalue()
         wav_buffer.seek(0)
 
         targetwords = demater.get_target_word_list_or_default(session_id=session_id)
 
-        # Выполняем цензурирование
         result = await run_in_threadpool(
             demater.process,
             input_file=wav_buffer,
             target_words=targetwords,
             session_id=session_id,
+            lead_in_sec=lead_in,
+            lead_out_sec=lead_out,
         )
 
         processed_audio_id = str(uuid.uuid4())
-        audio_cache[processed_audio_id] = (result["out_file"].getvalue(), time.time())
+        audio_cache[processed_audio_id] = result["out_file"].getvalue()
 
         # Формирование текстового отчета
         blocks = []
@@ -150,13 +198,60 @@ async def handle_message(
             "type": "text",
             "text_html": (
                 "<b>Привет!</b><br/>"
-                "Этот сервис запикивает части аудио с матом.<br/>"
+                "Этот сервис запикивает части аудио с нецензурной лексикой.<br/>"
                 "Вы можете отправить текст, загрузить аудио/видеофайл или записать голосовое сообщение прямо с микрофона.<br/><br/>"
                 "<b>Доступные команды:</b><br/>"
                 "<code>/targetwords</code> — посмотреть список слов<br/>"
                 "<code>/targetwords_set слово1 слово2</code> — задать свой список слов<br/>"
                 "<code>/targetwords_add слово1 слово2</code> — добавить слова в список<br/>"
-                "<code>/targetwords_reset</code> — сбросить список к стандартному"
+                "<code>/targetwords_reset</code> — сбросить список к стандартному<br/>"
+                "<code>/sounds</code> — список звуков запикивания<br/>"
+                "<code>/sound_set &lt;id&gt;</code> — переключить звук (например: <code>/sound_set silence</code>)<br/>"
+                "<code>/sound_reset</code> — вернуть стандартный пик<br/>"
+                "<code>/beep_margins 0.07 0.07</code> — настроить отступы оригинального звука (начало/конец в сек)"
+            ),
+        }
+
+    if text.startswith("/sounds"):
+        available = demater.get_available_sounds(session_id=session_id)
+        items = []
+        for s in available:
+            flag = "👉 <b>[Выбран]</b> " if s["is_active"] else ""
+            items.append(f"• {flag}<code>/sound_set {s['id']}</code> — {s['name']}")
+        msg = "<b>Доступные звуки запикивания:</b><br/>" + "<br/>".join(items)
+        msg += "<br/><br/><i>Для возврата к стандарту используйте: <code>/sound_reset</code></i>"
+        return {"type": "text", "text_html": msg}
+
+    if text.startswith("/sound_set"):
+        snd_id = text.replace("/sound_set", "").strip()
+        if demater.set_user_sound(session_id, snd_id):
+            return {"type": "text", "text_html": f"Звук запикивания изменен на: <b>{snd_id}</b>"}
+        return {"type": "text", "text_html": f"Звук <code>{snd_id}</code> не найден. Введите <code>/sounds</code> для просмотра списка."}
+
+    if text.startswith("/sound_reset"):
+        demater.set_user_sound(session_id, "default")
+        return {"type": "text", "text_html": "Установлен стандартный пик."}
+
+    if text.startswith("/beep_margins"):
+        parts = text.split()
+        user_dict = demater.get_user_data_or_new(session_id)
+        if len(parts) >= 3:
+            try:
+                user_dict["lead_in_sec"] = float(parts[1])
+                user_dict["lead_out_sec"] = float(parts[2])
+                return {
+                    "type": "text",
+                    "text_html": f"Установлены отступы: в начале <b>{parts[1]} с</b>, в конце <b>{parts[2]} с</b>.",
+                }
+            except ValueError:
+                pass
+        curr_in = user_dict.get("lead_in_sec", 0.07)
+        curr_out = user_dict.get("lead_out_sec", 0.07)
+        return {
+            "type": "text",
+            "text_html": (
+                f"Текущие отступы: в начале <b>{curr_in} с</b>, в конце <b>{curr_out} с</b>.<br/>"
+                "Формат команды: <code>/beep_margins 0.08 0.08</code>"
             ),
         }
 
@@ -203,40 +298,37 @@ async def handle_message(
     }
 
 
-from fastapi import Request, Response, status
-
 @app.get("/api/audio/{audio_id}")
 async def get_audio(audio_id: str, request: Request):
-    item = audio_cache.get(audio_id)
-    if item is None:
-        return JSONResponse(
-            status_code=404, 
-            content={"error": "Audio not found or expired"}
-        )
-    audio_data, _ = item
-    file_size = len(audio_data)
     range_header = request.headers.get("range")
 
-    headers = {
-        "Accept-Ranges": "bytes",
-        "Content-Disposition": f"inline; filename={audio_id}.wav",
-    }
-
-    # Если клиент (Safari/iPad) запросил диапазон байт
+    # Если это частичный запрос диапазона (Safari/iOS) — читаем без удаления до полного скачивания
     if range_header:
+        audio_data = audio_cache.get(audio_id)
+        if audio_data is None:
+            return JSONResponse(
+                status_code=404,
+                content={"error": "Audio not found or expired"},
+            )
+        file_size = len(audio_data)
         try:
-            # Формат заголовка: "bytes=start-end"
             range_value = range_header.strip().split("=")[-1]
             start_str, end_str = range_value.split("-")
-            
             start = int(start_str) if start_str else 0
             end = int(end_str) if end_str else file_size - 1
             end = min(end, file_size - 1)
-            
+
             chunk_length = end - start + 1
-            headers["Content-Range"] = f"bytes {start}-{end}/{file_size}"
-            headers["Content-Length"] = str(chunk_length)
-            
+            headers = {
+                "Accept-Ranges": "bytes",
+                "Content-Range": f"bytes {start}-{end}/{file_size}",
+                "Content-Length": str(chunk_length),
+                "Content-Disposition": f"inline; filename={audio_id}.wav",
+            }
+            # Если дочитали до конца файла — удаляем из кэша
+            if end >= file_size - 1:
+                audio_cache.pop(audio_id, None)
+
             return Response(
                 content=audio_data[start : end + 1],
                 status_code=status.HTTP_206_PARTIAL_CONTENT,
@@ -246,8 +338,20 @@ async def get_audio(audio_id: str, request: Request):
         except Exception:
             pass
 
-    # Обычный ответ, если Range не передан
-    headers["Content-Length"] = str(file_size)
+    # Одноразовое извлечение из кэша при обычном запросе
+    audio_data = audio_cache.pop(audio_id, None)
+    if audio_data is None:
+        return JSONResponse(
+            status_code=404,
+            content={"error": "Audio not found or expired"},
+        )
+
+    file_size = len(audio_data)
+    headers = {
+        "Accept-Ranges": "bytes",
+        "Content-Length": str(file_size),
+        "Content-Disposition": f"inline; filename={audio_id}.wav",
+    }
     return Response(
         content=audio_data,
         status_code=status.HTTP_200_OK,

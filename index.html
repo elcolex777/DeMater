@@ -46,9 +46,29 @@
       background: var(--bubble-in);
       border-bottom: 1px solid rgba(255,255,255,0.06);
       flex-shrink: 0;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
     }
     header h1 { font-size: 1.05rem; font-weight: 600; }
     .status { font-size: 0.75rem; color: var(--text-muted); }
+
+    .header-btn {
+      background: rgba(255, 255, 255, 0.08);
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      border-radius: 8px;
+      padding: 6px 12px;
+      font-size: 0.85rem;
+      color: var(--text);
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+    .header-btn:hover {
+      background: rgba(255, 255, 255, 0.15);
+    }
     
     .messages {
       flex: 1 1 auto;
@@ -77,7 +97,6 @@
       border-bottom-left-radius: 2px;
     }
     
-    /* Стили скрытого текста (спойлера) */
     .spoiler {
       background-color: #3b434c;
       color: #3b434c;
@@ -94,7 +113,6 @@
       user-select: text;
     }
 
-    /* Кликабельные команды */
     .cmd-link {
       color: var(--accent);
       text-decoration: underline;
@@ -106,7 +124,6 @@
       color: var(--accent-hover);
     }
 
-    /* Блоки с аудио */
     .audio-block {
       margin-top: 10px;
       padding: 8px 10px;
@@ -193,7 +210,6 @@
     }
     #fileInput { display: none; }
 
-    /* Всплывающее меню при выделении текста */
     .selection-tooltip {
       position: fixed;
       display: none;
@@ -220,20 +236,159 @@
     .selection-tooltip:active {
       background: var(--bubble-out);
     }
+
+    /* Модальное окно */
+    .modal-overlay {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.7);
+      backdrop-filter: blur(2px);
+      z-index: 10000;
+      align-items: center;
+      justify-content: center;
+      padding: 16px;
+    }
+    .modal-card {
+      background: var(--bubble-in);
+      width: 100%;
+      max-width: 500px;
+      border-radius: 14px;
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      padding: 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+      box-shadow: 0 12px 32px rgba(0,0,0,0.6);
+    }
+    .modal-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .modal-header h3 {
+      font-size: 1.15rem;
+      font-weight: 600;
+    }
+    .modal-close-btn {
+      background: none;
+      border: none;
+      color: var(--text-muted);
+      font-size: 1.4rem;
+      cursor: pointer;
+      line-height: 1;
+    }
+    .sounds-list {
+      max-height: 240px;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      padding-right: 4px;
+    }
+    .sound-item {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 10px 12px;
+      border-radius: 8px;
+      background: rgba(0, 0, 0, 0.2);
+      border: 1px solid rgba(255, 255, 255, 0.05);
+    }
+    .sound-item.active {
+      background: var(--bubble-out);
+      border-color: var(--accent);
+    }
+    .sound-item-name {
+      font-size: 0.95rem;
+      font-weight: 500;
+      color: #fff;
+    }
+    .sound-item-badge {
+      font-size: 0.72rem;
+      color: #6ab2f2;
+      margin-top: 2px;
+    }
+    .sound-actions {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .btn-preview {
+      background: none;
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      border-radius: 6px;
+      color: #fff;
+      padding: 4px 8px;
+      font-size: 0.75rem;
+      cursor: pointer;
+    }
+    .btn-select {
+      background: var(--accent);
+      border: none;
+      border-radius: 6px;
+      color: #fff;
+      padding: 5px 12px;
+      font-size: 0.78rem;
+      font-weight: 500;
+      cursor: pointer;
+    }
+    .upload-box {
+      border-top: 1px solid rgba(255, 255, 255, 0.08);
+      padding-top: 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    .upload-box input[type="text"] {
+      background: #242f3d;
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 8px;
+      padding: 8px 12px;
+      color: #fff;
+      outline: none;
+      font-size: 0.9rem;
+    }
+    .upload-box input[type="file"] {
+      font-size: 0.85rem;
+      color: var(--text-muted);
+    }
+    .btn-upload {
+      background: var(--accent);
+      border: none;
+      border-radius: 8px;
+      color: #fff;
+      padding: 9px 14px;
+      font-size: 0.9rem;
+      font-weight: 500;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+    }
+    .btn-upload:hover {
+      background: var(--accent-hover);
+    }
   </style>
 </head>
 <body>
   <div class="chat-container">
     <header>
-      <h1>DeMater Web Chat</h1>
-      <div class="status">Цензурирование текста, аудио и видео</div>
+      <div>
+        <h1>DeMater Web Chat</h1>
+        <div class="status">Цензурирование текста, аудио и видео</div>
+      </div>
+      <button id="soundsBtn" class="header-btn" title="Настройки звуков запикивания">
+        🔔 Звуки
+      </button>
     </header>
 
     <div class="messages" id="messages">
       <div class="msg bot">
         Привет! Я веб-версия DeMater.<br/>
         Отправьте текст, прикрепите аудио/видео файл или запишите голосовое.<br/>
-        Скрытые матерные слова можно открыть кликом.<br/>
+        Скрытые слова можно открыть кликом.<br/>
         Для получения списка всех команд нажмите <span class="cmd-link" data-cmd="/start">/start</span>.
       </div>
     </div>
@@ -277,6 +432,27 @@
     </div>
   </div>
 
+  <!-- Модальное окно управления звуками -->
+  <div id="soundsModal" class="modal-overlay">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h3>Звуки запикивания</h3>
+        <button class="modal-close-btn" onclick="closeSoundsModal()">&times;</button>
+      </div>
+
+      <div class="sounds-list" id="soundsList">
+        <span style="color:var(--text-muted); font-size: 0.85rem;">Загрузка...</span>
+      </div>
+
+      <div class="upload-box">
+        <div style="font-size: 0.85rem; color: var(--text-muted);">Загрузить свой звук (кряканье, гудок, шум):</div>
+        <input type="text" id="customSoundName" placeholder="Название (например: Кряканье утки)" />
+        <input type="file" id="customSoundFile" accept="audio/*" />
+        <button class="btn-upload" onclick="uploadCustomSound()">Загрузить и выбрать</button>
+      </div>
+    </div>
+  </div>
+
   <script>
     let sessionId = localStorage.getItem('demater_session_id');
     if (!sessionId) {
@@ -289,27 +465,122 @@
     const sendBtn = document.getElementById('sendBtn');
     const fileInput = document.getElementById('fileInput');
     const recordBtn = document.getElementById('recordBtn');
+    const soundsModal = document.getElementById('soundsModal');
 
-    // Оборачивает /команды внутри текста в кликабельные span
+    document.getElementById('soundsBtn').addEventListener('click', openSoundsModal);
+
+    function openSoundsModal() {
+      loadSounds();
+      soundsModal.style.display = 'flex';
+    }
+
+    function closeSoundsModal() {
+      soundsModal.style.display = 'none';
+    }
+
+    soundsModal.addEventListener('click', (e) => {
+      if (e.target === soundsModal) closeSoundsModal();
+    });
+
+    async function loadSounds() {
+      const container = document.getElementById('soundsList');
+      container.innerHTML = '<span style="color:var(--text-muted); font-size: 0.85rem;">Загрузка списка...</span>';
+      try {
+        const res = await fetch(`/api/sounds?session_id=${encodeURIComponent(sessionId)}`);
+        const data = await res.json();
+        container.innerHTML = '';
+
+        data.sounds.forEach(snd => {
+          const item = document.createElement('div');
+          item.className = `sound-item ${snd.is_active ? 'active' : ''}`;
+          
+          let previewBtn = '';
+          if (snd.id !== 'silence') {
+            previewBtn = `<button class="btn-preview" onclick="playPreview('${snd.id}')">▶ Тест</button>`;
+          }
+
+          let selectBtn = '';
+          if (!snd.is_active) {
+            selectBtn = `<button class="btn-select" onclick="activateSound('${snd.id}')">Выбрать</button>`;
+          }
+
+          item.innerHTML = `
+            <div>
+              <div class="sound-item-name">${snd.name}</div>
+              ${snd.is_active ? '<div class="sound-item-badge">● Активен для вашей сессии</div>' : ''}
+            </div>
+            <div class="sound-actions">
+              ${previewBtn}
+              ${selectBtn}
+            </div>
+          `;
+          container.appendChild(item);
+        });
+      } catch (err) {
+        container.innerHTML = '<span style="color:var(--danger)">Не удалось загрузить звуки</span>';
+      }
+    }
+
+    let activePreviewAudio = null;
+    function playPreview(soundId) {
+      if (activePreviewAudio) {
+        activePreviewAudio.pause();
+        activePreviewAudio = null;
+      }
+      activePreviewAudio = new Audio(`/api/sounds/${encodeURIComponent(soundId)}/preview?t=${Date.now()}`);
+      activePreviewAudio.play().catch(e => console.warn('Ошибка воспроизведения:', e));
+    }
+
+    async function activateSound(soundId) {
+      const fd = new FormData();
+      fd.append('session_id', sessionId);
+      fd.append('sound_id', soundId);
+      await fetch('/api/sounds/select', { method: 'POST', body: fd });
+      loadSounds();
+    }
+
+    async function uploadCustomSound() {
+      const nameInput = document.getElementById('customSoundName');
+      const soundFileEl = document.getElementById('customSoundFile');
+      if (!soundFileEl.files[0]) {
+        alert('Пожалуйста, выберите аудиофайл.');
+        return;
+      }
+      const fd = new FormData();
+      fd.append('session_id', sessionId);
+      fd.append('name', nameInput.value.trim() || 'Звук');
+      fd.append('sound_file', soundFileEl.files[0]);
+
+      try {
+        const res = await fetch('/api/sounds/upload', { method: 'POST', body: fd });
+        const data = await res.json();
+        if (data.error) {
+          alert('Ошибка: ' + data.error);
+        } else {
+          nameInput.value = '';
+          soundFileEl.value = '';
+          loadSounds();
+        }
+      } catch (err) {
+        alert('Ошибка при загрузке аудиофайла');
+      }
+    }
+
     function linkifyCommands(html) {
       return html.replace(/(^|[\s>])(\/[a-zA-Z0-9_]+)/g, (match, prefix, cmd) => {
         return `${prefix}<span class="cmd-link" data-cmd="${cmd}">${cmd}</span>`;
       });
     }
 
-    // Делегирование кликов по спойлерам и командам
     messagesBox.addEventListener('click', (e) => {
-      // Спойлеры
       if (e.target && e.target.classList.contains('spoiler')) {
         e.target.classList.toggle('revealed');
         return;
       }
-
-      // Кликабельные команды
       const cmdEl = e.target.closest('.cmd-link');
       if (cmdEl) {
         const cmd = cmdEl.getAttribute('data-cmd');
-        textInput.value = cmd + (cmd.includes('_set') || cmd.includes('_add') ? ' ' : '');
+        textInput.value = cmd + (cmd.includes('_set') || cmd.includes('_add') || cmd.includes('_margins') ? ' ' : '');
         textInput.focus();
         const len = textInput.value.length;
         textInput.setSelectionRange(len, len);
@@ -340,7 +611,6 @@
 
         let content = linkifyCommands(data.text_html || '');
 
-        // Вывод плееров с кнопками Скачать и Отправить еще раз
         if (data.audio_url) {
           content += `
             <div class="audio-block">
@@ -379,13 +649,12 @@
       }
     }
 
-    // Повторная отправка аудиофайла на обработку
     async function resendAudio(audioUrl, fileName) {
       appendMessage('user', `🔁 Повторная отправка аудио: <b>${fileName}</b>`);
       try {
         const response = await fetch(audioUrl);
         if (!response.ok) {
-          throw new Error('Файл не найден или истек срок его хранения');
+          throw new Error('Файл не найден или уже был удален из кэша');
         }
         const blob = await response.blob();
         const fd = new FormData();
@@ -412,7 +681,6 @@
       if (e.key === 'Enter') handleSendText();
     });
 
-    // Извлечение звука из видео прямо в браузере (экономия трафика)
     async function extractAudioFromVideoInBrowser(file) {
       const arrayBuffer = await file.arrayBuffer();
       const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
@@ -432,7 +700,6 @@
       return audioBufferToWavBlob(renderedBuffer);
     }
 
-    // Вспомогательный энкодер PCM WAV (16 kHz mono 16-bit)
     function audioBufferToWavBlob(audioBuffer) {
       const numOfChan = audioBuffer.numberOfChannels;
       const length = audioBuffer.length * numOfChan * 2 + 44;
@@ -446,18 +713,17 @@
       function setUint16(data) { view.setUint16(pos, data, true); pos += 2; }
       function setUint32(data) { view.setUint32(pos, data, true); pos += 4; }
 
-      // WAV заголовок
       setUint32(0x46464952); // "RIFF"
       setUint32(length - 8);
       setUint32(0x45564157); // "WAVE"
       setUint32(0x20746d66); // "fmt "
-      setUint32(16);         // Длина чанка fmt
+      setUint32(16);
       setUint16(1);          // PCM
       setUint16(numOfChan);
       setUint32(sampleRate);
-      setUint32(sampleRate * 2 * numOfChan); // Byte rate
-      setUint16(numOfChan * 2);              // Block align
-      setUint16(16);                         // Bits per sample
+      setUint32(sampleRate * 2 * numOfChan);
+      setUint16(numOfChan * 2);
+      setUint16(16);
       setUint32(0x61746164); // "data"
       setUint32(length - pos - 4);
 
@@ -509,7 +775,6 @@
       fileInput.value = '';
     });
 
-    // Запись аудио
     let mediaRecorder = null;
     let audioChunks = [];
 
@@ -521,11 +786,7 @@
       }
 
       if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-        alert(
-          'Запись с микрофона заблокирована браузером!\n\n' +
-          'Браузеры требуют безопасное соединение (HTTPS) для доступа к микрофону.\n' +
-          'Настройте SSL сертификат (HTTPS) или откройте сайт через http://localhost.'
-        );
+        alert('Запись с микрофона заблокирована браузером. Требуется HTTPS или localhost.');
         return;
       }
 
@@ -555,7 +816,6 @@
       }
     });
 
-    // --- Всплывающее меню при выделении текста ---
     const selectionTooltip = document.getElementById('selectionTooltip');
     let selectedTextValue = '';
     let isInteractingWithTooltip = false;
@@ -593,16 +853,13 @@
           const tooltipHeight = selectionTooltip.offsetHeight;
           selectionTooltip.style.visibility = 'visible';
 
-          // Размещаем ПОД фразой с отступом 10px (чтобы не перекрывалось системным меню)
           let top = rect.bottom + 10;
           let left = rect.left + (rect.width / 2) - (tooltipWidth / 2);
 
-          // Если снизу экрана нет места — поднимаем наверх
           if (top + tooltipHeight > window.innerHeight - 60) {
             top = rect.top - tooltipHeight - 10;
           }
 
-          // Границы экрана
           if (left < 10) left = 10;
           if (left + tooltipWidth > window.innerWidth - 10) {
             left = window.innerWidth - tooltipWidth - 10;
@@ -616,7 +873,6 @@
 
     document.addEventListener('mouseup', checkSelection);
     document.addEventListener('touchend', checkSelection);
-
     messagesBox.addEventListener('scroll', hideTooltip, { passive: true });
 
     function applySelectedWords(e) {
@@ -627,7 +883,6 @@
       if (!selectedTextValue) return;
 
       const formattedText = selectedTextValue.replace(/\s+/g, ' ');
-
       textInput.value = `/targetwords_add ${formattedText}`;
 
       if (window.getSelection) {
