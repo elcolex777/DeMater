@@ -421,7 +421,6 @@
     </div>
   </div>
 
-  <!-- Всплывающий тултип при выделении текста -->
   <div id="selectionTooltip" class="selection-tooltip">
     <div class="selection-tooltip-btn">
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -432,7 +431,6 @@
     </div>
   </div>
 
-  <!-- Модальное окно управления звуками -->
   <div id="soundsModal" class="modal-overlay">
     <div class="modal-card">
       <div class="modal-header">
@@ -580,7 +578,7 @@
       const cmdEl = e.target.closest('.cmd-link');
       if (cmdEl) {
         const cmd = cmdEl.getAttribute('data-cmd');
-        textInput.value = cmd + (cmd.includes('_set') || cmd.includes('_add') || cmd.includes('_margins') || cmd.includes('_short') ? ' ' : '');
+        textInput.value = cmd + (cmd.includes('_set') || cmd.includes('_add') || cmd.includes('_margins') || cmd.includes('_short') || cmd.includes('_max') ? ' ' : '');
         textInput.focus();
         const len = textInput.value.length;
         textInput.setSelectionRange(len, len);
@@ -601,49 +599,104 @@
       const loadingMsg = appendMessage('bot', '<em>Обработка...</em>');
 
       try {
-        const res = await fetch('/api/message', { method: 'POST', body: formData });
-        const data = await res.json();
+        const response = await fetch('/api/message/stream', {
+          method: 'POST',
+          body: formData
+        });
 
-        if (data.error) {
-          loadingMsg.innerHTML = `<span style="color:var(--danger)">Ошибка: ${data.error}</span>`;
-          return;
+        if (!response.ok) {
+          throw new Error('Ошибка сервера: ' + response.statusText);
         }
 
-        let content = linkifyCommands(data.text_html || '');
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder('utf-8');
+        let buffer = '';
 
-        if (data.audio_url) {
-          content += `
-            <div class="audio-block">
-              <div class="audio-block-title">
-                <span>🎧 Зацензурированное аудио</span>
-                <div class="audio-block-actions">
-                  <button type="button" onclick="resendAudio('${data.audio_url}', 'censored_resend.wav')">Отправить еще раз</button>
-                  <a href="${data.audio_url}" download="censored.wav">Скачать</a>
-                </div>
-              </div>
-              <audio controls preload="metadata" src="${data.audio_url}"></audio>
-            </div>
-          `;
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          buffer += decoder.decode(value, { stream: true });
+          
+          // Нормализуем переносы строк для надежного парсинга SSE
+          const normalized = buffer.replace(/\r\n/g, '\n');
+          const events = normalized.split('\n\n');
+          buffer = events.pop(); // Оставляем незавершенный блок в буфере
+
+          for (const ev of events) {
+            if (!ev.trim()) continue;
+            const lines = ev.split('\n');
+            let eventType = 'message';
+            let dataStr = '';
+
+            for (const line of lines) {
+              if (line.startsWith(':')) continue; // комментарий или keepalive
+              if (line.startsWith('event:')) {
+                eventType = line.replace('event:', '').trim();
+              } else if (line.startsWith('data:')) {
+                dataStr = line.replace('data:', '').trim();
+              }
+            }
+
+            if (!dataStr) continue;
+
+            let parsed;
+            try {
+              parsed = JSON.parse(dataStr);
+            } catch (err) {
+              console.warn("Не удалось распарсить SSE data JSON:", dataStr);
+              continue;
+            }
+
+            if (eventType === 'progress') {
+              if (parsed.status) {
+                loadingMsg.innerHTML = `<em>${parsed.status}</em>`;
+                messagesBox.scrollTop = messagesBox.scrollHeight;
+              }
+            } else if (eventType === 'final') {
+              if (parsed.error) {
+                loadingMsg.innerHTML = `<span style="color:var(--danger)">Ошибка при обработке: ${parsed.error}</span>`;
+                return;
+              }
+
+              let content = linkifyCommands(parsed.text_html || '');
+
+              if (parsed.audio_url) {
+                content += `
+                  <div class="audio-block">
+                    <div class="audio-block-title">
+                      <span>🎧 Зацензурированное аудио</span>
+                      <div class="audio-block-actions">
+                        <button type="button" onclick="resendAudio('${parsed.audio_url}', 'censored_resend.wav')">Отправить еще раз</button>
+                        <a href="${parsed.audio_url}" download="censored.wav">Скачать</a>
+                      </div>
+                    </div>
+                    <audio controls preload="metadata" src="${parsed.audio_url}"></audio>
+                  </div>
+                `;
+              }
+
+              if (parsed.original_audio_url) {
+                content += `
+                  <div class="audio-block">
+                    <div class="audio-block-title">
+                      <span>🔊 Оригинальный файл (без изменений)</span>
+                      <div class="audio-block-actions">
+                        <button type="button" onclick="resendAudio('${parsed.original_audio_url}', 'original_resend.wav')">Отправить еще раз</button>
+                        <a href="${parsed.original_audio_url}" download="original.wav">Скачать</a>
+                      </div>
+                    </div>
+                    <audio controls preload="metadata" src="${parsed.original_audio_url}"></audio>
+                  </div>
+                `;
+              }
+
+              loadingMsg.innerHTML = content;
+            }
+          }
         }
-
-        if (data.original_audio_url) {
-          content += `
-            <div class="audio-block">
-              <div class="audio-block-title">
-                <span>🔊 Оригинальный файл (без изменений)</span>
-                <div class="audio-block-actions">
-                  <button type="button" onclick="resendAudio('${data.original_audio_url}', 'original_resend.wav')">Отправить еще раз</button>
-                  <a href="${data.original_audio_url}" download="original.wav">Скачать</a>
-                </div>
-              </div>
-              <audio controls preload="metadata" src="${data.original_audio_url}"></audio>
-            </div>
-          `;
-        }
-
-        loadingMsg.innerHTML = content;
       } catch (err) {
-        loadingMsg.innerHTML = `<span style="color:var(--danger)">Ошибка соединения с сервером</span>`;
+        loadingMsg.innerHTML = `<span style="color:var(--danger)">Ошибка соединения: ${err.message}</span>`;
       } finally {
         messagesBox.scrollTop = messagesBox.scrollHeight;
       }
@@ -875,7 +928,6 @@
     document.addEventListener('touchend', checkSelection);
     messagesBox.addEventListener('scroll', hideTooltip, { passive: true });
 
-    // Добавление слов в команду через пробел без перезаписи уже набранного текста
     function applySelectedWords(e) {
       if (e) {
         e.preventDefault();

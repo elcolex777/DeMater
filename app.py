@@ -1,4 +1,7 @@
+import asyncio
 import io
+import json
+import logging
 import os
 import re
 import subprocess
@@ -9,9 +12,11 @@ from typing import Optional
 from fastapi import FastAPI, File, Form, Request, Response, UploadFile, status
 from fastapi.concurrency import run_in_threadpool
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 
 from demater import DeMater
+
+logger = logging.getLogger("app")
 
 app = FastAPI(title="DeMater Web Chat")
 
@@ -23,7 +28,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Конфигурация движков
 model_path = os.environ.get("DEMATBOT_MODEL_PATH", "models/vosk-model-small-ru-0.22")
 demater = DeMater(
     vosk_model_path=model_path,
@@ -32,12 +36,9 @@ demater = DeMater(
     enable_whisper=False,
 )
 
-# Кэш аудио: {audio_id: {"data": bytes, "first_accessed_at": Optional[float], "created_at": float}}
 audio_cache: dict[str, dict] = {}
 
-# Время жизни файла после первого обращения: 20 минут (1200 секунд)
 ACCESS_GRACE_PERIOD_SEC = 20 * 60
-# Время жизни невостребованного файла в кэше (30 минут)
 UNACCESSED_TTL_SEC = 1800
 
 
@@ -66,18 +67,17 @@ def markdown_spoiler_to_html(text: str) -> str:
 
 
 def convert_audio_to_wav(input_bytes: bytes) -> io.BytesIO:
-    """Извлекает и конвертирует аудио (включая видео-контейнеры) в 16kHz mono WAV."""
     cmd = [
         "ffmpeg",
+        "-y",
         "-i", "pipe:0",
-        "-vn",                 # Игнорировать видеопоток
+        "-vn",
         "-f", "wav",
-        "-ar", "16000",        # Частота 16 kHz для Whisper/Vosk
-        "-ac", "1",            # Моно
+        "-ar", "16000",
+        "-ac", "1",
         "-acodec", "pcm_s16le",
         "pipe:1",
     ]
-
     process = subprocess.Popen(
         cmd,
         stdin=subprocess.PIPE,
@@ -94,18 +94,14 @@ def convert_audio_to_wav(input_bytes: bytes) -> io.BytesIO:
     return wav_buffer
 
 
-# --- ЭНДПОИНТЫ УПРАВЛЕНИЯ ЗВУКАМИ ---
-
 @app.get("/api/sounds")
 async def list_sounds(session_id: str):
-    """Список всех доступных звуков и статус активности для session_id."""
     sounds = demater.get_available_sounds(session_id=session_id)
     return {"sounds": sounds}
 
 
 @app.post("/api/sounds/select")
 async def select_sound(session_id: str = Form(...), sound_id: str = Form(...)):
-    """Выбрать текущий звук для сессии."""
     ok = demater.set_user_sound(session_id, sound_id)
     if not ok:
         return JSONResponse(status_code=400, content={"error": "Звук не найден"})
@@ -118,19 +114,18 @@ async def upload_sound(
     name: str = Form(...),
     sound_file: UploadFile = File(...),
 ):
-    """Загрузка нового пользовательского звука (кряканье, гудок, шум и т.д.)."""
     content = await sound_file.read()
     try:
         sound_id = await run_in_threadpool(demater.register_custom_sound, name, content)
         demater.set_user_sound(session_id, sound_id)
         return {"status": "ok", "sound_id": sound_id, "name": name}
     except Exception as e:
+        logger.exception("Ошибка сохранения звука")
         return JSONResponse(status_code=400, content={"error": f"Ошибка сохранения звука: {str(e)}"})
 
 
 @app.get("/api/sounds/{sound_id}/preview")
 async def preview_sound(sound_id: str):
-    """Предпрослушивание звука запикивания."""
     if sound_id == "silence":
         return Response(content=b"", media_type="audio/wav")
 
@@ -149,79 +144,7 @@ async def preview_sound(sound_id: str):
     return Response(content=file_path.read_bytes(), media_type="audio/wav")
 
 
-# --- ОСНОВНАЯ ОБРАБОТКА СООБЩЕНИЙ ---
-
-@app.post("/api/message")
-async def handle_message(
-    session_id: str = Form(...),
-    text: str = Form(None),
-    audio_file: UploadFile = File(None),
-    lead_in: Optional[float] = Form(None),
-    lead_out: Optional[float] = Form(None),
-    short_thresh: Optional[float] = Form(None),
-    short_beep: Optional[float] = Form(None),
-):
-    cleanup_audio_cache()
-
-    # --- ОБРАБОТКА АУДИО И ВИДЕО ---
-    if audio_file:
-        content = await audio_file.read()
-        try:
-            wav_buffer = await run_in_threadpool(convert_audio_to_wav, content)
-        except Exception as e:
-            return JSONResponse(
-                status_code=400,
-                content={"error": f"Ошибка обработки медиафайла: {str(e)}"},
-            )
-
-        original_audio_id = str(uuid.uuid4())
-        audio_cache[original_audio_id] = {
-            "data": wav_buffer.getvalue(),
-            "first_accessed_at": None,
-            "created_at": time.time(),
-        }
-        wav_buffer.seek(0)
-
-        targetwords = demater.get_target_word_list_or_default(session_id=session_id)
-
-        result = await run_in_threadpool(
-            demater.process,
-            input_file=wav_buffer,
-            target_words=targetwords,
-            session_id=session_id,
-            lead_in_sec=lead_in,
-            lead_out_sec=lead_out,
-            short_word_threshold=short_thresh,
-            short_word_beep_duration=short_beep,
-        )
-
-        processed_audio_id = str(uuid.uuid4())
-        audio_cache[processed_audio_id] = {
-            "data": result["out_file"].getvalue(),
-            "first_accessed_at": None,
-            "created_at": time.time(),
-        }
-
-        # Формирование текстового отчета
-        blocks = []
-        for _, method_info in result.get("methods", {}).items():
-            name = method_info["name"]
-            masked = markdown_spoiler_to_html(method_info["masked_text"])
-            count = method_info["count"]
-            blocks.append(
-                f"<b>Вариант ({name}):</b><br/>{masked}<br/><i>Найдено слов: {count}</i>"
-            )
-
-        formatted_msg = "<br/><br/>".join(blocks) if blocks else "Распознавание завершено."
-
-        return {
-            "type": "audio",
-            "text_html": formatted_msg,
-            "audio_url": f"/api/audio/{processed_audio_id}",
-            "original_audio_url": f"/api/audio/{original_audio_id}",
-        }
-
-    # --- ОБРАБОТКА ТЕКСТА И КОМАНД ---
+def build_text_command_response(text: str, session_id: str) -> dict:
     text = (text or "").strip()
     if not text:
         return {"type": "text", "text_html": "Пустое сообщение"}
@@ -242,7 +165,8 @@ async def handle_message(
                 "<code>/sound_set &lt;id&gt;</code> — переключить звук (например: <code>/sound_set silence</code>)<br/>"
                 "<code>/sound_reset</code> — вернуть стандартный пик<br/>"
                 "<code>/beep_margins 0.07 0.07</code> — отступы оригинального звука (начало/конец в сек)<br/>"
-                "<code>/beep_short 0.210 0.250</code> — порог короткого слова и длина запикивания"
+                "<code>/beep_short 0.210 0.250</code> — порог короткого слова и длина запикивания<br/>"
+                "<code>/beep_max 0.5</code> — максимальная длительность запикивания слова"
             ),
         }
 
@@ -312,6 +236,27 @@ async def handle_message(
             ),
         }
 
+    if text.startswith("/beep_max"):
+        parts = text.split()
+        user_dict = demater.get_user_data_or_new(session_id)
+        if len(parts) >= 2:
+            try:
+                user_dict["max_word_beep_duration"] = float(parts[1])
+                return {
+                    "type": "text",
+                    "text_html": f"Максимальная длина запикивания установлена на: <b>{parts[1]} с</b>.",
+                }
+            except ValueError:
+                pass
+        curr_max = user_dict.get("max_word_beep_duration", 0.500)
+        return {
+            "type": "text",
+            "text_html": (
+                f"Текущий максимум длины запикивания: <b>{curr_max} с</b>.<br/>"
+                "Формат команды: <code>/beep_max 0.5</code>"
+            ),
+        }
+
     if text.startswith("/targetwords_reset"):
         if session_id in demater.user_data:
             demater.user_data[session_id]["target_word_list_custom"] = ""
@@ -365,6 +310,211 @@ async def handle_message(
     }
 
 
+@app.post("/api/message/stream")
+async def handle_message_stream(
+    session_id: str = Form(...),
+    text: str = Form(None),
+    audio_file: UploadFile = File(None),
+    lead_in: Optional[float] = Form(None),
+    lead_out: Optional[float] = Form(None),
+    short_thresh: Optional[float] = Form(None),
+    short_beep: Optional[float] = Form(None),
+    max_beep: Optional[float] = Form(None),
+):
+    cleanup_audio_cache()
+
+    audio_bytes: Optional[bytes] = None
+    if audio_file:
+        audio_bytes = await audio_file.read()
+
+    async def event_generator():
+        if not audio_bytes:
+            res_data = build_text_command_response(text, session_id)
+            yield f"event: final\ndata: {json.dumps(res_data, ensure_ascii=False)}\n\n"
+            return
+
+        try:
+            wav_buffer = await run_in_threadpool(convert_audio_to_wav, audio_bytes)
+        except Exception as e:
+            logger.exception("Ошибка конвертации аудиофайла")
+            err_data = {"error": f"Ошибка конвертации медиа: {str(e) or 'некорректный формат'}"}
+            yield f"event: final\ndata: {json.dumps(err_data, ensure_ascii=False)}\n\n"
+            return
+
+        original_audio_id = str(uuid.uuid4())
+        audio_cache[original_audio_id] = {
+            "data": wav_buffer.getvalue(),
+            "first_accessed_at": None,
+            "created_at": time.time(),
+        }
+        wav_buffer.seek(0)
+
+        targetwords = demater.get_target_word_list_or_default(session_id=session_id)
+
+        loop = asyncio.get_running_loop()
+        status_queue = asyncio.Queue()
+
+        def progress_cb(current: int, total: int):
+            if total > 1:
+                msg = f"⏳ Обрабатывается {current} часть из {total}..."
+            else:
+                msg = "⏳ Обработка аудио..."
+            loop.call_soon_threadsafe(status_queue.put_nowait, msg)
+
+        proc_task = asyncio.create_task(
+            run_in_threadpool(
+                demater.process,
+                input_file=wav_buffer,
+                target_words=targetwords,
+                session_id=session_id,
+                lead_in_sec=lead_in,
+                lead_out_sec=lead_out,
+                short_word_threshold=short_thresh,
+                short_word_beep_duration=short_beep,
+                max_word_beep_duration=max_beep,
+                progress_callback=progress_cb,
+            )
+        )
+
+        start_time = time.time()
+        long_notice_sent = False
+
+        while not proc_task.done():
+            elapsed = time.time() - start_time
+
+            if elapsed >= 15.0 and not long_notice_sent:
+                long_notice_sent = True
+                yield "event: progress\ndata: " + json.dumps(
+                    {"status": "⚙️ Обработка продолжается (больше 15 секунд), сервер работает в штатном режиме..."},
+                    ensure_ascii=False,
+                ) + "\n\n"
+
+            try:
+                msg = await asyncio.wait_for(status_queue.get(), timeout=0.5)
+                yield f"event: progress\ndata: {json.dumps({'status': msg}, ensure_ascii=False)}\n\n"
+            except asyncio.TimeoutError:
+                # Отправляем SSE keep-alive комментарий, предотвращающий таймауты прокси
+                yield ": keepalive\n\n"
+
+        while not status_queue.empty():
+            msg = status_queue.get_nowait()
+            yield f"event: progress\ndata: {json.dumps({'status': msg}, ensure_ascii=False)}\n\n"
+
+        try:
+            result = await proc_task
+        except Exception as e:
+            logger.exception("Ошибка внутри demater.process")
+            err_msg = str(e) if str(e).strip() else f"внутренняя ошибка ({type(e).__name__})"
+            yield f"event: final\ndata: {json.dumps({'error': err_msg}, ensure_ascii=False)}\n\n"
+            return
+
+        processed_audio_id = str(uuid.uuid4())
+        audio_cache[processed_audio_id] = {
+            "data": result["out_file"].getvalue(),
+            "first_accessed_at": None,
+            "created_at": time.time(),
+        }
+
+        blocks = []
+        for _, method_info in result.get("methods", {}).items():
+            name = method_info["name"]
+            masked = markdown_spoiler_to_html(method_info["masked_text"])
+            count = method_info["count"]
+            blocks.append(f"<b>Вариант ({name}):</b><br/>{masked}<br/><i>Найдено слов: {count}</i>")
+
+        formatted_msg = "<br/><br/>".join(blocks) if blocks else "Распознавание завершено."
+
+        final_response = {
+            "type": "audio",
+            "text_html": formatted_msg,
+            "audio_url": f"/api/audio/{processed_audio_id}",
+            "original_audio_url": f"/api/audio/{original_audio_id}",
+        }
+        yield f"event: final\ndata: {json.dumps(final_response, ensure_ascii=False)}\n\n"
+
+    # Заголовки, отключающие буферизацию Nginx и браузера
+    sse_headers = {
+        "Content-Type": "text/event-stream; charset=utf-8",
+        "Cache-Control": "no-cache, no-transform",
+        "Connection": "keep-alive",
+        "X-Accel-Buffering": "no",
+    }
+    return StreamingResponse(event_generator(), headers=sse_headers, media_type="text/event-stream")
+
+
+@app.post("/api/message")
+async def handle_message(
+    session_id: str = Form(...),
+    text: str = Form(None),
+    audio_file: UploadFile = File(None),
+    lead_in: Optional[float] = Form(None),
+    lead_out: Optional[float] = Form(None),
+    short_thresh: Optional[float] = Form(None),
+    short_beep: Optional[float] = Form(None),
+    max_beep: Optional[float] = Form(None),
+):
+    cleanup_audio_cache()
+
+    if audio_file:
+        content = await audio_file.read()
+        try:
+            wav_buffer = await run_in_threadpool(convert_audio_to_wav, content)
+        except Exception as e:
+            return JSONResponse(status_code=400, content={"error": f"Ошибка обработки медиафайла: {str(e)}"})
+
+        original_audio_id = str(uuid.uuid4())
+        audio_cache[original_audio_id] = {
+            "data": wav_buffer.getvalue(),
+            "first_accessed_at": None,
+            "created_at": time.time(),
+        }
+        wav_buffer.seek(0)
+
+        targetwords = demater.get_target_word_list_or_default(session_id=session_id)
+
+        try:
+            result = await run_in_threadpool(
+                demater.process,
+                input_file=wav_buffer,
+                target_words=targetwords,
+                session_id=session_id,
+                lead_in_sec=lead_in,
+                lead_out_sec=lead_out,
+                short_word_threshold=short_thresh,
+                short_word_beep_duration=short_beep,
+                max_word_beep_duration=max_beep,
+            )
+        except Exception as e:
+            logger.exception("Ошибка внутри demater.process в синхронном режиме")
+            err_msg = str(e) if str(e).strip() else f"внутренняя ошибка ({type(e).__name__})"
+            return JSONResponse(status_code=500, content={"error": err_msg})
+
+        processed_audio_id = str(uuid.uuid4())
+        audio_cache[processed_audio_id] = {
+            "data": result["out_file"].getvalue(),
+            "first_accessed_at": None,
+            "created_at": time.time(),
+        }
+
+        blocks = []
+        for _, method_info in result.get("methods", {}).items():
+            name = method_info["name"]
+            masked = markdown_spoiler_to_html(method_info["masked_text"])
+            count = method_info["count"]
+            blocks.append(f"<b>Вариант ({name}):</b><br/>{masked}<br/><i>Найдено слов: {count}</i>")
+
+        formatted_msg = "<br/><br/>".join(blocks) if blocks else "Распознавание завершено."
+
+        return {
+            "type": "audio",
+            "text_html": formatted_msg,
+            "audio_url": f"/api/audio/{processed_audio_id}",
+            "original_audio_url": f"/api/audio/{original_audio_id}",
+        }
+
+    return build_text_command_response(text, session_id)
+
+
 @app.get("/api/audio/{audio_id}")
 async def get_audio(audio_id: str, request: Request):
     cleanup_audio_cache()
@@ -376,7 +526,6 @@ async def get_audio(audio_id: str, request: Request):
             content={"error": "Audio not found or expired"},
         )
 
-    # При первом запросе файла запускаем отсчет времени grace-периода (20 минут)
     if item["first_accessed_at"] is None:
         item["first_accessed_at"] = time.time()
 
@@ -389,7 +538,6 @@ async def get_audio(audio_id: str, request: Request):
         "Content-Disposition": f"inline; filename={audio_id}.wav",
     }
 
-    # Поддержка частичных Range-запросов (Safari/iOS/Chrome)
     if range_header:
         try:
             range_value = range_header.strip().split("=")[-1]
@@ -411,7 +559,6 @@ async def get_audio(audio_id: str, request: Request):
         except Exception:
             pass
 
-    # Обычный полный ответ
     headers["Content-Length"] = str(file_size)
     return Response(
         content=audio_data,
