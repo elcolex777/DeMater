@@ -35,9 +35,9 @@ demater = DeMater(
 # Кэш аудио: {audio_id: {"data": bytes, "first_accessed_at": Optional[float], "created_at": float}}
 audio_cache: dict[str, dict] = {}
 
-# Время жизни файла после первого обращения (достаточно для служебных Range-запросов браузера и скачивания)
-ACCESS_GRACE_PERIOD_SEC = 120
-# Максимальное время жизни невостребованного файла в кэше
+# Время жизни файла после первого обращения: увеличено до 20 минут
+ACCESS_GRACE_PERIOD_SEC = 20 * 60  # 1200 секунд
+# Время жизни невостребованного файла в кэше
 UNACCESSED_TTL_SEC = 1800
 
 
@@ -292,26 +292,36 @@ async def handle_message(
         return {"type": "text", "text_html": f"Список сброшен:<br/>{markdown_spoiler_to_html(masked)}..."}
 
     if text.startswith("/targetwords_set"):
-        words = text.replace("/targetwords_set", "").strip().replace(" ", ",").lower()
-        if words:
-            demater.get_user_data_or_new(session_id)["target_word_list_custom"] = words
+        words_raw = text.replace("/targetwords_set", "").strip()
+        parsed_words = [w.strip().lower() for w in re.split(r"[\s,]+", words_raw) if w.strip()]
+        if parsed_words:
+            demater.save_user_suggested_words(parsed_words)
+            demater.get_user_data_or_new(session_id)["target_word_list_custom"] = ",".join(parsed_words)
+
         targetwords = demater.get_target_word_list_or_default(session_id=session_id).split(",")[:20]
         masked = demater.replace_text(" ".join(targetwords), targetwords)
         return {"type": "text", "text_html": f"Установлен список:<br/>{markdown_spoiler_to_html(masked)}"}
 
     if text.startswith("/targetwords_add"):
-        words = text.replace("/targetwords_add", "").strip().replace(" ", ",").lower()
-        if words:
+        words_raw = text.replace("/targetwords_add", "").strip()
+        parsed_words = [w.strip().lower() for w in re.split(r"[\s,]+", words_raw) if w.strip()]
+        if parsed_words:
+            demater.save_user_suggested_words(parsed_words)
             current = demater.get_target_word_list_or_default(session_id=session_id)
-            demater.get_user_data_or_new(session_id)["target_word_list_custom"] = f"{words},{current}"
+            new_joined = ",".join(parsed_words)
+            demater.get_user_data_or_new(session_id)["target_word_list_custom"] = f"{new_joined},{current}"
+
         targetwords = demater.get_target_word_list_or_default(session_id=session_id).split(",")[:20]
         masked = demater.replace_text(" ".join(targetwords), targetwords)
         return {"type": "text", "text_html": f"Слова добавлены. Текущий список:<br/>{markdown_spoiler_to_html(masked)}"}
 
     if text.startswith("/targetwords"):
-        words = text.replace("/targetwords", "").strip().replace(" ", ",").lower()
-        if words:
-            demater.get_user_data_or_new(session_id)["target_word_list_custom"] = words
+        words_raw = text.replace("/targetwords", "").strip()
+        parsed_words = [w.strip().lower() for w in re.split(r"[\s,]+", words_raw) if w.strip()]
+        if parsed_words:
+            demater.save_user_suggested_words(parsed_words)
+            demater.get_user_data_or_new(session_id)["target_word_list_custom"] = ",".join(parsed_words)
+
         targetwords = demater.get_target_word_list_or_default(session_id=session_id).split(",")[:20]
         masked = demater.replace_text(" ".join(targetwords), targetwords)
         suffix = "..." if len(targetwords) >= 20 else ""
@@ -338,7 +348,7 @@ async def get_audio(audio_id: str, request: Request):
             content={"error": "Audio not found or expired"},
         )
 
-    # При первом запросе файла запускаем отсчет времени до очистки (120 секунд)
+    # При первом запросе файла запускаем отсчет времени grace-периода (20 минут)
     if item["first_accessed_at"] is None:
         item["first_accessed_at"] = time.time()
 
@@ -351,7 +361,7 @@ async def get_audio(audio_id: str, request: Request):
         "Content-Disposition": f"inline; filename={audio_id}.wav",
     }
 
-    # Если клиент (браузер) запросил диапазон байт (Range request)
+    # Поддержка частичных Range-запросов (Safari/iOS/Chrome)
     if range_header:
         try:
             range_value = range_header.strip().split("=")[-1]

@@ -1,14 +1,20 @@
 import io
 import json
+import logging
 import os
 import re
 import subprocess
+import time
 import wave
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import numpy as np
 from vosk import KaldiRecognizer, Model
+
+logger = logging.getLogger("demater")
+if not logger.handlers:
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 
 
 class DeMater:
@@ -29,6 +35,9 @@ class DeMater:
         self.custom_beeps_dir = Path("custom_beeps")
         self.custom_beeps_dir.mkdir(exist_ok=True)
 
+        # Файл для сохранения добавленных пользователями слов
+        self.user_added_words_file = Path("user_added_words.txt")
+
         # Инициализация словаря матерных слов
         words_path = Path("words.txt")
         if words_path.exists():
@@ -45,7 +54,7 @@ class DeMater:
             if os.path.exists(vosk_model_path):
                 self.vosk_model = Model(model_path=vosk_model_path)
             else:
-                print(f"[DeMater] Vosk model not found at {vosk_model_path}. Disabling Vosk.")
+                logger.warning(f"Vosk model not found at {vosk_model_path}. Disabling Vosk.")
                 self.enable_vosk = False
 
         # 2. Faster-Whisper
@@ -69,7 +78,7 @@ class DeMater:
                 cpu_threads=os.cpu_count() or 2,
             )
         except Exception as e:
-            print(f"[DeMater] Error loading faster-whisper: {e}")
+            logger.error(f"Error loading faster-whisper: {e}")
             self.enable_faster_whisper = False
 
     def _init_whisper_transformers(self, model_id: str):
@@ -98,7 +107,7 @@ class DeMater:
                 device=device,
             )
         except Exception as e:
-            print(f"[DeMater] Error loading Transformers Whisper: {e}")
+            logger.error(f"Error loading Transformers Whisper: {e}")
             self.enable_whisper = False
 
     def get_user_data_or_new(self, session_id: str) -> dict:
@@ -113,6 +122,41 @@ class DeMater:
         if session_id_str in self.user_data:
             custom = self.user_data[session_id_str].get("target_word_list_custom", "")
         return custom if custom != "" else self.target_word_list_default
+
+    def save_user_suggested_words(self, words: List[str]) -> List[str]:
+        """
+        Сохраняет новые уникальные слова пользователей в файл на диске
+        для последующей ручной модерации и обновления основного words.txt.
+        """
+        if not words:
+            return []
+
+        # Читаем уже существующие слова в основном словаре и в файле предложенных
+        known_words = {
+            w.strip().lower() for w in self.target_word_list_default.split(",") if w.strip()
+        }
+        if self.user_added_words_file.exists():
+            existing_suggested = self.user_added_words_file.read_text(encoding="utf-8").splitlines()
+            for line in existing_suggested:
+                clean_w = line.split("#")[0].strip().lower()
+                if clean_w:
+                    known_words.add(clean_w)
+
+        new_unique = []
+        for w in words:
+            clean = w.strip().lower()
+            if clean and clean not in known_words:
+                new_unique.append(clean)
+                known_words.add(clean)
+
+        if new_unique:
+            with open(self.user_added_words_file, "a", encoding="utf-8") as f:
+                date_str = time.strftime("%Y-%m-%d %H:%M:%S")
+                for w in new_unique:
+                    f.write(f"{w}  # added: {date_str}\n")
+            logger.info(f"Сохранено новых пользовательских слов в {self.user_added_words_file}: {new_unique}")
+
+        return new_unique
 
     def get_available_sounds(self, session_id: Optional[str] = None) -> List[dict]:
         """Возвращает список доступных звуков с отметкой активного для сессии."""
@@ -355,12 +399,12 @@ class DeMater:
         session_id: Optional[str] = None,
         lead_in_sec: float = 0.07,
         lead_out_sec: float = 0.07,
-        min_beep_duration: float = 0.08,
+        min_beep_duration: float = 0.12,
         fade_sec: float = 0.008,
     ) -> io.BytesIO:
         """
         Заменяет запрещенные отрезки аудио на звук запикивания с сохранением 
-        начального и конечного отрезков слова для разборчивости на слух.
+        начального звука слова и асимметричным сжатием конца для коротких слов.
         """
         out_file = io.BytesIO()
         input_file.seek(0)
@@ -392,17 +436,19 @@ class DeMater:
                 w_end = detected_word["end"]
                 total_duration = max(0.0, w_end - w_start)
 
-                available_margins = lead_in_sec + lead_out_sec
+                # --- АСИММЕТРИЧНЫЙ РАСЧЕТ ОТСТУПОВ ---
                 if total_duration <= min_beep_duration:
-                    eff_lead_in = total_duration * 0.15
-                    eff_lead_out = total_duration * 0.15
-                elif total_duration - available_margins < min_beep_duration:
-                    scale = (total_duration - min_beep_duration) / available_margins
-                    eff_lead_in = lead_in_sec * max(0.0, scale)
-                    eff_lead_out = lead_out_sec * max(0.0, scale)
+                    eff_lead_in = min(0.035, total_duration * 0.25)
+                    eff_lead_out = 0.0
                 else:
                     eff_lead_in = lead_in_sec
-                    eff_lead_out = lead_out_sec
+                    rem_after_lead_in = total_duration - eff_lead_in
+
+                    if rem_after_lead_in < min_beep_duration:
+                        eff_lead_out = 0.0
+                        eff_lead_in = max(0.04, total_duration - min_beep_duration)
+                    else:
+                        eff_lead_out = max(0.0, min(lead_out_sec, rem_after_lead_in - min_beep_duration))
 
                 beep_start = w_start + eff_lead_in
                 beep_end = max(beep_start, w_end - eff_lead_out)
@@ -540,6 +586,25 @@ class DeMater:
             if not any(abs(word_info["start"] - u["start"]) < 0.15 for u in unique_detected):
                 unique_detected.append(word_info)
 
+        # Статистика продолжительности распознанных матерных слов
+        word_stats = []
+        log_lines = []
+        for w in unique_detected:
+            duration = max(0.0, w["end"] - w["start"])
+            word_name = w.get("word", "unknown")
+            word_stats.append({
+                "word": word_name,
+                "duration": round(duration, 3),
+                "start": round(w["start"], 3),
+                "end": round(w["end"], 3),
+            })
+            log_lines.append(f"  • {word_name}: {duration:.3f} с (от {w['start']:.3f} до {w['end']:.3f} с)")
+
+        if log_lines:
+            logger.info("Статистика распознанных матерных слов:\n" + "\n".join(log_lines))
+        else:
+            logger.info("Матерных слов в аудио не обнаружено.")
+
         out_file = self.replace_audio(
             input_file,
             unique_detected,
@@ -552,6 +617,7 @@ class DeMater:
             "out_file": out_file,
             "methods": methods_data,
             "total_detected_words": len(unique_detected),
+            "word_stats": word_stats,
             "text": methods_data.get("vosk", {}).get("masked_text", ""),
             "detected_word_list_count": methods_data.get("vosk", {}).get("count", 0),
             "text_whisper": methods_data.get("faster_whisper", {}).get("masked_text", ""),

@@ -882,8 +882,23 @@
       }
       if (!selectedTextValue) return;
 
-      const formattedText = selectedTextValue.replace(/\s+/g, ' ');
-      textInput.value = `/targetwords_add ${formattedText}`;
+      const formattedText = selectedTextValue.replace(/\s+/g, ' ').trim();
+      const currentVal = textInput.value.trim();
+
+      const cmdPrefix = '/targetwords_add';
+
+      if (currentVal.startsWith(cmdPrefix)) {
+        // Проверяем существующие токены, чтобы не добавлять одно и то же слово дважды подряд
+        const existingWords = currentVal.substring(cmdPrefix.length).trim().split(/\s+/);
+        const newWords = formattedText.split(/\s+/).filter(w => !existingWords.includes(w));
+
+        if (newWords.length > 0) {
+          textInput.value = `${currentVal} ${newWords.join(' ')}`;
+        }
+      } else {
+        // Если поле было пустым или содержало другой ввод
+        textInput.value = `${cmdPrefix} ${formattedText}`;
+      }
 
       if (window.getSelection) {
         window.getSelection().removeAllRanges();
