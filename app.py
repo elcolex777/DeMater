@@ -32,8 +32,27 @@ demater = DeMater(
     enable_whisper=False,
 )
 
-# Одноразовый кэш аудио: {audio_id: bytes_data}
-audio_cache: dict[str, bytes] = {}
+# Кэш аудио: {audio_id: {"data": bytes, "first_accessed_at": Optional[float], "created_at": float}}
+audio_cache: dict[str, dict] = {}
+
+# Время жизни файла после первого обращения (достаточно для служебных Range-запросов браузера и скачивания)
+ACCESS_GRACE_PERIOD_SEC = 120
+# Максимальное время жизни невостребованного файла в кэше
+UNACCESSED_TTL_SEC = 1800
+
+
+def cleanup_audio_cache():
+    now = time.time()
+    expired_ids = []
+    for audio_id, item in audio_cache.items():
+        if item["first_accessed_at"] is not None:
+            if now - item["first_accessed_at"] > ACCESS_GRACE_PERIOD_SEC:
+                expired_ids.append(audio_id)
+        elif now - item["created_at"] > UNACCESSED_TTL_SEC:
+            expired_ids.append(audio_id)
+
+    for audio_id in expired_ids:
+        audio_cache.pop(audio_id, None)
 
 
 def markdown_spoiler_to_html(text: str) -> str:
@@ -99,7 +118,7 @@ async def upload_sound(
     name: str = Form(...),
     sound_file: UploadFile = File(...),
 ):
-    """Загрузка нового пользовательского звука (кряканье, гудок, утка и т.д.)."""
+    """Загрузка нового пользовательского звука (кряканье, гудок, шум и т.д.)."""
     content = await sound_file.read()
     try:
         sound_id = await run_in_threadpool(demater.register_custom_sound, name, content)
@@ -118,12 +137,12 @@ async def preview_sound(sound_id: str):
     file_path = demater.custom_beeps_dir / f"{sound_id}.wav"
     if not file_path.exists():
         if sound_id == "default":
-            file_path = os.path.join("data", "censor-beep-2-16000.wav")
-            if not os.path.exists(file_path):
-                file_path = os.path.join("data", "censor-beep-2-2.wav")
-            if not os.path.exists(file_path):
+            file_path_str = os.path.join("data", "censor-beep-2-16000.wav")
+            if not os.path.exists(file_path_str):
+                file_path_str = os.path.join("data", "censor-beep-2-2.wav")
+            if not os.path.exists(file_path_str):
                 return Response(content=b"\x00" * 32000, media_type="audio/wav")
-            with open(file_path, "rb") as f:
+            with open(file_path_str, "rb") as f:
                 return Response(content=f.read(), media_type="audio/wav")
         return JSONResponse(status_code=404, content={"error": "Файл не найден"})
 
@@ -140,6 +159,8 @@ async def handle_message(
     lead_in: Optional[float] = Form(None),
     lead_out: Optional[float] = Form(None),
 ):
+    cleanup_audio_cache()
+
     # --- ОБРАБОТКА АУДИО И ВИДЕО ---
     if audio_file:
         content = await audio_file.read()
@@ -152,7 +173,11 @@ async def handle_message(
             )
 
         original_audio_id = str(uuid.uuid4())
-        audio_cache[original_audio_id] = wav_buffer.getvalue()
+        audio_cache[original_audio_id] = {
+            "data": wav_buffer.getvalue(),
+            "first_accessed_at": None,
+            "created_at": time.time(),
+        }
         wav_buffer.seek(0)
 
         targetwords = demater.get_target_word_list_or_default(session_id=session_id)
@@ -167,7 +192,11 @@ async def handle_message(
         )
 
         processed_audio_id = str(uuid.uuid4())
-        audio_cache[processed_audio_id] = result["out_file"].getvalue()
+        audio_cache[processed_audio_id] = {
+            "data": result["out_file"].getvalue(),
+            "first_accessed_at": None,
+            "created_at": time.time(),
+        }
 
         # Формирование текстового отчета
         blocks = []
@@ -300,17 +329,30 @@ async def handle_message(
 
 @app.get("/api/audio/{audio_id}")
 async def get_audio(audio_id: str, request: Request):
+    cleanup_audio_cache()
+
+    item = audio_cache.get(audio_id)
+    if item is None:
+        return JSONResponse(
+            status_code=404,
+            content={"error": "Audio not found or expired"},
+        )
+
+    # При первом запросе файла запускаем отсчет времени до очистки (120 секунд)
+    if item["first_accessed_at"] is None:
+        item["first_accessed_at"] = time.time()
+
+    audio_data = item["data"]
+    file_size = len(audio_data)
     range_header = request.headers.get("range")
 
-    # Если это частичный запрос диапазона (Safari/iOS) — читаем без удаления до полного скачивания
+    headers = {
+        "Accept-Ranges": "bytes",
+        "Content-Disposition": f"inline; filename={audio_id}.wav",
+    }
+
+    # Если клиент (браузер) запросил диапазон байт (Range request)
     if range_header:
-        audio_data = audio_cache.get(audio_id)
-        if audio_data is None:
-            return JSONResponse(
-                status_code=404,
-                content={"error": "Audio not found or expired"},
-            )
-        file_size = len(audio_data)
         try:
             range_value = range_header.strip().split("=")[-1]
             start_str, end_str = range_value.split("-")
@@ -319,15 +361,8 @@ async def get_audio(audio_id: str, request: Request):
             end = min(end, file_size - 1)
 
             chunk_length = end - start + 1
-            headers = {
-                "Accept-Ranges": "bytes",
-                "Content-Range": f"bytes {start}-{end}/{file_size}",
-                "Content-Length": str(chunk_length),
-                "Content-Disposition": f"inline; filename={audio_id}.wav",
-            }
-            # Если дочитали до конца файла — удаляем из кэша
-            if end >= file_size - 1:
-                audio_cache.pop(audio_id, None)
+            headers["Content-Range"] = f"bytes {start}-{end}/{file_size}"
+            headers["Content-Length"] = str(chunk_length)
 
             return Response(
                 content=audio_data[start : end + 1],
@@ -338,20 +373,8 @@ async def get_audio(audio_id: str, request: Request):
         except Exception:
             pass
 
-    # Одноразовое извлечение из кэша при обычном запросе
-    audio_data = audio_cache.pop(audio_id, None)
-    if audio_data is None:
-        return JSONResponse(
-            status_code=404,
-            content={"error": "Audio not found or expired"},
-        )
-
-    file_size = len(audio_data)
-    headers = {
-        "Accept-Ranges": "bytes",
-        "Content-Length": str(file_size),
-        "Content-Disposition": f"inline; filename={audio_id}.wav",
-    }
+    # Обычный полный ответ
+    headers["Content-Length"] = str(file_size)
     return Response(
         content=audio_data,
         status_code=status.HTTP_200_OK,
